@@ -9,14 +9,15 @@ from Constants import clmt_vars
 lat = 128
 lon = 256
 time = 30
-data_dir = '../clmt_data/'
 n_channels = len(clmt_vars)
 
 class DataLoader:
 
 	def __init__(self):
 		self.splitted_tensor = None
-		
+		self.train = None
+		self.dev = None
+		self.test = None
 
 	def export_netcdf(self,filename, var_name):
 		"""
@@ -35,7 +36,7 @@ class DataLoader:
 		return var
 
 
-	def build_dataset(self):
+	def build_dataset(self, data_dir):
 		"""
 		Builds dataset out of all climate variables of shape NxHxWxTxC, where:
 			N - #of datapoints (days)
@@ -70,7 +71,7 @@ class DataLoader:
 			print("Finished parsing {} files for variable \"{}\" ".format(len(filenames),key))
 		
 		res_tsr = torch.stack(all_tensors, dim=3)		
-		print("Finished parsing {} files total\n".format(count_files))
+		print("Finished parsing {} files total".format(count_files))
 
 		#permuate tensor for convenience
 		res_tsr = res_tsr.permute(1, 2, 0, 3)
@@ -82,7 +83,7 @@ class DataLoader:
 	
 		#concatenate tensors back
 		splitted_tsr = torch.stack(splitted_tsrs, dim=0)
-		print("The size of result tensor is {}\n".format(splitted_tsr.shape))
+		print("The size of result tensor is {}".format(splitted_tsr.shape))
 		self.splitted_tensor = splitted_tsr
 
 		return self.splitted_tensor
@@ -144,10 +145,12 @@ class DataLoader:
 		assert "One of the sets contains an unexpected number of elements", \
 			(train.shape[0] == train_len and dev.shape[0] == dev_len and test.shape[0] == test_len)
 
+		self.train, self.dev, self.test = train, dev, test
 		
 		return train, dev, test
 
 
 	
-	
-	
+	#def get_batch(self, data, batch_size):
+		
+		
