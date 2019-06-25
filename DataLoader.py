@@ -30,7 +30,7 @@ def export_netcdf(filename, var_name):
 def main():
 	
 	for key, val in clmt_vars.items():
-		file_dir = data_dir + val[1] + '/'
+		file_dir = data_dir + val + '/'
 		#create tensor for one climate variable
 		concat_tensor = None
 		#sort files in ascending order (based on the date)
