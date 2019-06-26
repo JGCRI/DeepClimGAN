@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from layers import *
+from ops import *
 from Constants import clmt_vars
 
 
