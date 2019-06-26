@@ -3,6 +3,7 @@ import netCDF4 as n
 import numpy as np
 import torch.nn as nn
 import torch
+import random
 from Constants import clmt_vars
 
 #default params
@@ -151,6 +152,46 @@ class DataLoader:
 
 
 	
-	#def get_batch(self, data, batch_size):
+	def get_batch(self, data, batch_size, shuffle=True):
+		""""
+		
+		 Returns batch of training data
+		:param data: data (N-d tensor)
+		:param batch_size (int) Size of a mini-batch
+		
+		return a batch of data of shape: batch_size x H x W x T x C	
+		"""
+		n_batches = 32
+		data_len = data.shape[0]
+		n_batches = data_len // batch_size #NOTE: last batch may be partial
+		
+
+		batches = torch.chunk(data, n_batches, dim=0)
+
+                #concatenate tensors back to get shape batch_size x H x W x T x C
+                data = torch.stack(batches, dim=0)		
+		print(data.shape)
+
+		#if shuffle:
+			
+			
+		#rand_idx = random.int(data_len - batch_size)
+		
+		#return data[train_idx:batch_size,:]			
 		
 		
+		
+		
+		
+	def get_noise(self, N):
+		"""
+		Creates a multivariate normal (Gaussian) distribution 
+		parametrized by a mean vector and a covariance matrix
+
+		param: N (int) Dimension of a distribution
+		
+		return sample from N-dimensional Gaussian distribution 
+		"""
+		m = MultivariateNormal(torch.zeros(N), torch.eye(N))		
+		m.sample()
+		return m
