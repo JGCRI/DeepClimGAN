@@ -4,14 +4,14 @@ from ops import *
 from Constants import clmt_vars
 
 
-
 """
 reference: https://github.com/batsa003/videogan/blob/master/model.py
 """
 n_channels = len(clmt_vars)
 
-class Discriminator:
+class Discriminator(nn.Module):
 	def __init__(self):
+		super(Discriminator, self).__init__()
 		self.model = nn.Sequential(
 			conv3d(n_channels, 128),
 			lrelu(0.2),

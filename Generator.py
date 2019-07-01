@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn as nn
 
 from ops import *
 from Constants import clmt_vars
@@ -11,6 +12,7 @@ n_channels = len(clmt_vars)
 
 class Generator(nn.Module):
 	def __init__(self):
+		super(Generator, self).__init__()
 		self.model = nn.Sequential(
 			deconv3d(512,512),
 			batchNorm5d(512),
@@ -25,8 +27,8 @@ class Generator(nn.Module):
 			batchNorm5d(64),
 			relu())
 
-		self.out_net = nn.Sequential(deconv3d(64, n_channels), nn.Tanh())
-	
+		self.out_net = nn.Sequential(deconv3d(64, n_channels), nn.Tanh())	
+
 	
 	def forward(self, x):
 		x = self.model(x)
