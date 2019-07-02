@@ -7,6 +7,10 @@ from Generator import Generator
 from Normalizer import Normalizer
 import torch
 from torch.utils import data 
+import torch.distributed as dist
+from torch.multiprocessing import Process
+from Utils import Utils
+
 
 
 def weights_init(m):
@@ -29,8 +33,8 @@ def weights_init(m):
 
 def to_gpu(x):
 	if torch.cuda.is_available():
+		#TODO: check of tensors are transfered succesfully to GPU
 		x = x.cuda()
-
 
 def to_variable(x, requires_grad = True):
 	to_gpu(x)
@@ -55,13 +59,22 @@ num_epoch = 5
 batch_size = 64
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 l1_lambda = 10
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
 
 netD = Discriminator()
 netG = Generator()
 netD.apply(weights_init)
 netG.apply(weights_init)
-to_gpu(netD)
-to_gpu(netG)
+
+#use all possible GPU cores available
+if torch.cuda.device.count() > 1:
+	print("Using ", torch.device.count(), "GPUs!")
+	netD = nn.DataParallel(netD)
+	netG = nn.DataParallel(netG)
+netD.to(device)
+netG.to(device)
 
 
 loss_func = torch.nn.CrossEntropyLoss()
@@ -73,30 +86,30 @@ print("Started parsing data...")
 ds = NETCDFDataset(data_dir, train_pct)
 
 ds_len = ds.__len__()
-print(ds_len)
-
+train_len = ds.train_len
+utils = Utils()
 if apply_norm:
-	norm = Normalizer()
-	train_dev = norm.normalize_all(ds[:, ds.train_len + ds.dev_len])
+	normalizer = Normalizer()
+	#compute normalizatio values based on the train set only
+	normalizer.normalize(train_len, data_dir, utils, ds.files_to_idx)
 
 #apply lazy loading
 print(ds.shape)
 dl = data.DataLoader(dataset=ds[:,:,0:ds.train_len,:], batch_size=batch_size, shuffle=False, num_workers=4, drop_last=True)	
 	
 for current_epoch in tqdm(range(1, num_epoch+1)):
-	n_updates = 1
 	for batch_idx, batch in enumerate(dl):
 		input, current_month = batch
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
 		#move batch to GPU
-		to_gpu(batch)		
+		input = input.to(device)		
 		
 		#train Discriminator for k iterations
 		for i in xrange(k):
 			netD.zero_grad()
 			netG.zero_grad()
-			outputs = netD(batch).squeeze()
+			outputs = netD(input).squeeze()
 			d_real_loss = loss_func(outputs, real_labels)
 			z = ds.get_noise(z_shape)
 			fake_inputs = netG(z)
@@ -122,5 +135,16 @@ for current_epoch in tqdm(range(1, num_epoch+1)):
 		print("epoch {}, g_loss = {}\n".format(current_epoch,g_loss.item()))
 
 
-	n_updates += 1
-					
+
+#if __name == "__main__":
+#	#Number of nodes we want to use 
+#	size = 2
+#	processes = []
+#	for rank in range(size):
+#		p = Process(target=init_processes, args=(rank, size, run))
+#		p.start()
+#		processes.append(p)
+#
+#	for p in processes:
+#		p.join()
+#

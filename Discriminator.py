@@ -13,7 +13,9 @@ class Discriminator(nn.Module):
 	def __init__(self):
 		super(Discriminator, self).__init__()
 		self.model = nn.Sequential(
-			conv3d(n_channels, 128),
+			#model takes n_channels+2 as number of channels, 
+			#since we are doing conditional GAN
+			conv3d(n_channels+2, 128),
 			lrelu(0.2),
 			conv3d(128, 256),
 			batchNorm5d(256, 1e-3),

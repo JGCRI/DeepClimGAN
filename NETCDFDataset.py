@@ -21,9 +21,9 @@ class NETCDFDataset(data.Dataset):
 
 	def __init__(self, data_dir, train_pct):
 
-		self.data = self.build_dataset(data_dir)
-		self.len = self.data.shape[2]
-		self.train, self.dev, self.test = self.create_split_bounds(self.len, train_pct)				
+		self.len, self.file_to_idx = self.count_days_in_file(data_dir)
+		self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)				
+#		self.data = self.build_dataset(data_dir)
 
 
 	def __len__(self):
@@ -44,13 +44,17 @@ class NETCDFDataset(data.Dataset):
 		current_month - one month of records to compute the loss (H x W x 30 x N_channels)
 		
 		"""
+	
 		#first 5 days are reserved for the context
 		start = 5
 		n_days = 30
-		print(start + idx, start + n_days + idx)
 		current_month = self.data[:, :, (start + idx):(start + n_days + idx), :]#output size is H x W x 30 x N_channels
+		#TODO: handle the case where prev or next is in different file
 		prev_5 = self.data[:, :, (start + idx - 5):(start + idx), :]
 		next_5 = self.data[:, :, (start + idx):(start + idx + 5), :]
+		###
+		
+		
 		keys = list(clmt_vars.keys())
 		pr_idx = keys.index('pr')
 		tas_idx = keys.index('tas')
@@ -79,7 +83,28 @@ class NETCDFDataset(data.Dataset):
                 lat = nc.variables['lat'][:]
                 var = nc.variables[var_name][:]
                 return var
+	
+	def count_days_in_dataset(self, data_dir):
+		"""We can pass name of the file of any variable
+		  since we assume that number of days per each variable is the same.
+		  We will also store the range of indexes relatively to the whole dataset,
+		  and their mapping to the name of the file.		
+		"""
+		clmt_var = clmt_vars.keys[0]
+		file_dir = data_dir + clmt_dir
+		filenames = os.listdir(file_dir)
+		filenames = sorted(filenames)
+		#mapping from indexes to filenames
+		file_to_idx = {}
+		dataset_len = 0
+		#for i, filename in enumerate(filenames):
+			nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')	
+			data_len = nc.variables[var_name][:].shape[0]
+			start, end = dataset_len, dataset_len + data_len - 1
+			file_to_idx[filename] = [start, end]
+			dataset_len += data_len
 
+		return dataset_len, file_to_idx
 	
 
 	def build_dataset(self, data_dir):
@@ -184,9 +209,10 @@ def main():
 	batch_size = 128
 	start = time.time()
 	ds = NETCDFDataset(data_dir, train_pct)
-	dl = data.DataLoader(dataset=ds, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
+	dl = data.DataLoader(dataset=ds, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
 	for batch_idx, batch in enumerate(dl):
 		input, current_month = batch
+		print(input.shape, current_month.shape)
 	print(time.time() - start)
 
 
