@@ -7,10 +7,6 @@ from Generator import Generator
 from Normalizer import Normalizer
 import torch
 from torch.utils import data 
-import torch.distributed as dist
-from torch.multiprocessing import Process
-from Utils import Utils
-
 
 
 def weights_init(m):
@@ -85,9 +81,6 @@ g_optim = torch.optim.Adam(netG.parameters(), lr, [0.5, 0.999])
 print("Started parsing data...")
 ds = NETCDFDataset(data_dir, train_pct)
 
-ds_len = ds.__len__()
-train_len = ds.train_len
-
 if apply_norm:
 	normalizer = Normalizer()
 	#normalize training set
@@ -95,8 +88,7 @@ if apply_norm:
 	
 
 #Specify that we are loading training set
-dl = data.DataLoader(ds, batch_size=bsz, shuffle=False, num_workers=2, drop_last=True)	
-	
+dl = data.DataLoader(ds, batch_size=bsz, shuffle=False, num_workers=2, drop_last=True)		
 
 for current_epoch in tqdm(range(1, num_epoch+1)):
 	for batch_idx, batch in enumerate(dl):

@@ -6,6 +6,12 @@ import torch.nn as nn
 import random
 from Constants import clmt_vars
 from torch.utils import data
+#use to visualize the data
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy import stats
+
+
 
 #default params
 lat = 128
@@ -226,13 +232,41 @@ def main():
 	start = time.time()
 	data_pct = 0.8
 	ds = NETCDFDataset(data_dir, data_pct, train_pct)
-	dl = data.DataLoader(dataset=ds, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
-	for batch_idx, batch in enumerate(dl):
-		input, current_month = batch
-		print(input.shape, current_month.shape)
-	print(time.time() - start)
+	visualize_channels(ds.data)
+	
 
 
+
+
+#	dl = data.DataLoader(dataset=ds, batch_size=batch_size, shuffle=False, num_workers=2, drop_last=True)
+#	for batch_idx, batch in enumerate(dl):
+#		input, current_month = batch
+#		print(input.shape, current_month.shape)
+#	print(time.time() - start)
+
+
+def visualize_channels(data):
+	"""
+	Plot the distribution of the data
+	"""	
+	for i, (var, val) in enumerate(clmt_vars.keys()):
+		visualize_tensor(np.take(data, i, axis=data.shape[-1]), var_name)
+				
+
+
+	
+def visualize_channel(tensor, var_name):
+	"""
+	Plot data distribution for one channel
+	param: tensor: H x W x T
+	"""
+	flattened = tensor.flatten()
+	plot = sns.distplot(x, kde=True, rug=False)
+	fig = plot.get_figure()
+	fig.savefig('../' + var_name + '.png')
+	
+		
+	
 	
 main()
 	

@@ -41,18 +41,28 @@ class Normalizer:
 	return min, max
 
 
-    def normalize_channel(self, batch, clmt_var):
+    def normalize_channel(self, data, clmt_var):
         """
         Normalizes  data across the dim
-        param: batch (tensor) Batch of data
+        param: data (tensor) H x W x T
 
         return normalized data
         """
         min = self.clmt_vars[clmt_var][0]
         max = self.clmt_vars[clmt_var][1]
-        x_norm = (batch - min) / max
+        x_norm = (data - min) / max
         return x_norm
 
+	
+    def log_normalize_channel(self, data, clmt_var):
+	"""
+	Log normalize the data (base e)
+	param: data (tensr) H x W x T
+
+	return normalized data
+	"""
+	x = np.log(1 + x)
+	return x
 
 
     def denormalize(self, batch, clmt_var):
@@ -99,14 +109,15 @@ class Normalizer:
         """	
         for i, (var, val) in enumerate(clmt_vars.keys()):
                 norm_type = val[1]
+		ax = data.shape[-1]
                 if norm_type == 'stand':
-                        mean, std = self.normalize(data[-1][i])
+                        mean, std = self.normalize(np.take(data, i, axis=ax))
 			self.clmt_vars[var] = [mean, std]
-                	data[-1][i] = self.normalize_channel(data[-1][i], var)
+                	np.take(data, i, axis=ax) = self.normalize_channel(np.take(data, i, axis=ax), var)
 		elif norm_type == 'norm':
-                        min, max = self.standartize(data[-1][i])	
+                        min, max = self.standartize(np.take(data, i, axis=3))	
        			self.clmt_vars[var] = [min, max]
-			data[-1][i] = self.standartize_channel(data[-1][i], var)
+			np.take(data, i, axis=ax) = self.standartize_channel(np.take(data, i, axis=ax), var)
 	 return data
 
 	
@@ -120,8 +131,7 @@ class Normalizer:
 	if dataset_type not in ['train', 'dev']:
 		raise Exception('Correct dataset type is not provided. Use \'train\' or \'dev\' ')		
 
-	up = 0
-	lb = 0
+	up, lb = 0, 0
 	if dataset_type == 'train'
 		lb = data.train_len
 	elif dataset_type == 'dev':
@@ -132,10 +142,11 @@ class Normalizer:
 	
 	for i, (var,val) in enumerate(clmt_vars.keys()):
 		norm_type = val[1]
+		ax = data.shape[-1]
 		if norm_type == 'stand':
-			tensor[-1][i] = self.standartize(tensor[-1][i])
+			np.take(data, i, axis=ax) = self.standartize(np.take(data, i, axis=ax))
 		elif norm_type == 'norm':
-			tensor[-1][i] = self.normalize(tensor[-1][i])
+			np.take(data, i, axis=ax) = self.normalize(np.take(data, i ,axis=ax))
 	
 	#create link in the dataset to a normalized data
 	return tensor
