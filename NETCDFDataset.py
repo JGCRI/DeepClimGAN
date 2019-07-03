@@ -19,16 +19,26 @@ data_dir = '../clmt_data/'
 
 class NETCDFDataset(data.Dataset):
 
-	def __init__(self, data_dir, train_pct):
+	def __init__(self, data_dir, data_pct, train_pct):
+		"""
+		Init the dataset
+		
+		param: data_pct (float) Percent of data to use for training, development and testing
+		param: train_pct (float) Percent of data to use for training
 
-		self.len, self.file_to_idx = self.count_days_in_file(data_dir)
+		"""
+
+		self.data, self.len  = self.build_dataset(data_dir, data_pct)
 		self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)				
-#		self.data = self.build_dataset(data_dir)
-
+		
+		#will be initialized later
+		self.train_normalized = None
+		self.dev_normalized = None
+				
 
 	def __len__(self):
 		"""
-		Number of months (datapoints ) in the dataset
+		Number of days (datapoints ) in the dataset
 		"""
 		return self.len
 
@@ -44,16 +54,13 @@ class NETCDFDataset(data.Dataset):
 		current_month - one month of records to compute the loss (H x W x 30 x N_channels)
 		
 		"""
-	
+		train = self.train_normalized	
 		#first 5 days are reserved for the context
 		start = 5
 		n_days = 30
-		current_month = self.data[:, :, (start + idx):(start + n_days + idx), :]#output size is H x W x 30 x N_channels
-		#TODO: handle the case where prev or next is in different file
-		prev_5 = self.data[:, :, (start + idx - 5):(start + idx), :]
-		next_5 = self.data[:, :, (start + idx):(start + idx + 5), :]
-		###
-		
+		current_month = train[:, :, (start + idx):(start + n_days + idx), :]#output size is H x W x 30 x N_channels
+		prev_5 = train[:, :, (start + idx - 5):(start + idx), :]
+		next_5 = train[:, :, (start + idx):(start + idx + 5), :]
 		
 		keys = list(clmt_vars.keys())
 		pr_idx = keys.index('pr')
@@ -79,42 +86,47 @@ class NETCDFDataset(data.Dataset):
                 """
 
                 nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')
-                lon = nc.variables['lon'][:]
-                lat = nc.variables['lat'][:]
                 var = nc.variables[var_name][:]
                 return var
 	
-	def count_days_in_dataset(self, data_dir):
-		"""We can pass name of the file of any variable
-		  since we assume that number of days per each variable is the same.
-		  We will also store the range of indexes relatively to the whole dataset,
-		  and their mapping to the name of the file.		
-		"""
-		clmt_var = clmt_vars.keys[0]
-		file_dir = data_dir + clmt_dir
-		filenames = os.listdir(file_dir)
-		filenames = sorted(filenames)
-		#mapping from indexes to filenames
-		file_to_idx = {}
-		dataset_len = 0
-		#for i, filename in enumerate(filenames):
-			nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')	
-			data_len = nc.variables[var_name][:].shape[0]
-			start, end = dataset_len, dataset_len + data_len - 1
-			file_to_idx[filename] = [start, end]
-			dataset_len += data_len
 
-		return dataset_len, file_to_idx
+
+
+#	def count_days_in_dataset(self, data_dir):
+#		"""We can pass name of the file of any variable
+#		  since we assume that number of days per each variable is the same.
+#		  We will also store the range of indexes relatively to the whole dataset,
+#		  and their mapping to the name of the file.		
+#		"""
+#		clmt_var = clmt_vars.keys[0]
+#		file_dir = data_dir + clmt_dir
+#		filenames = os.listdir(file_dir)
+#		filenames = sorted(filenames)
+#		#mapping from id of the file (when sorted) to ids of the days in the file
+#		#{"1" : [0, 250]} - example
+#		file_to_idx = {}
+#		dataset_len = 0
+#		#for i, filename in enumerate(filenames):
+#			nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')	
+#			data_len = nc.variables[var_name][:].shape[0]
+#			#start and day indicate index of a day relative to the whole dataset
+#			start, end = dataset_len, dataset_len + data_len - 1
+#			file_to_idx[str(i)] = [start, end]
+#			#file_to_idx[filename] = [start, end]
+#			dataset_len += data_len
+#
+#		return dataset_len, file_to_idx
 	
 
-	def build_dataset(self, data_dir):
+	def build_dataset(self, data_dir, data_pct):
                 """
                 Builds dataset out of all climate variables of shape HxWxNxC, where:
                         N - #of datapoints (days)
                         H - latitude
                         W - longitude
                         C - #of channels (climate variables)
-
+		param: data_dir(str) directory with the data
+		param: data_pct (float) percent of the data to use
                 :return dataset as a tensor
                 """
 
@@ -142,11 +154,17 @@ class NETCDFDataset(data.Dataset):
                         print("Finished parsing {} files for variable \"{}\" ".format(len(filenames),key))
                 res_tsr = torch.stack(all_tensors, dim=3)
                 print("Finished parsing {} files total".format(count_files))
+		tensor_len = res_tsr.shape[0]
+		
+		#if we decided not to use all the data;add window size (5 days) that are used for context 
+		data_len = np.floor(tensor_len * data_pct) + window_size
+		res_tsr = res_tsr[:data_len, :, :, :]
+
 		
                 #permuate tensor for convenience
                 res_tsr = res_tsr.permute(1, 2, 0, 3)#H x W x N x N
                 print("The size of result tensor is {}".format(res_tsr.shape))
-                return res_tsr
+                return res_tsr, data_len
 
 
 	def create_split_bounds(self, N, train_pct):
@@ -197,9 +215,7 @@ class NETCDFDataset(data.Dataset):
 		expanded_map = torch.cat(list(torch.split(map, 1, dim=2)) * 40, dim=2)
 		return expanded_map
 			
-		
-
-
+	
 
 
 def main():
@@ -208,7 +224,8 @@ def main():
 	train_pct = 0.7
 	batch_size = 128
 	start = time.time()
-	ds = NETCDFDataset(data_dir, train_pct)
+	data_pct = 0.8
+	ds = NETCDFDataset(data_dir, data_pct, train_pct)
 	dl = data.DataLoader(dataset=ds, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
 	for batch_idx, batch in enumerate(dl):
 		input, current_month = batch

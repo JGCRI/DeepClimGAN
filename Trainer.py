@@ -87,16 +87,17 @@ ds = NETCDFDataset(data_dir, train_pct)
 
 ds_len = ds.__len__()
 train_len = ds.train_len
-utils = Utils()
+
 if apply_norm:
 	normalizer = Normalizer()
-	#compute normalizatio values based on the train set only
-	normalizer.normalize(train_len, data_dir, utils, ds.files_to_idx)
-
-#apply lazy loading
-print(ds.shape)
-dl = data.DataLoader(dataset=ds[:,:,0:ds.train_len,:], batch_size=batch_size, shuffle=False, num_workers=4, drop_last=True)	
+	#normalize training set
+	ds.normalized_train = normalizer.normalize(ds, 'train')
 	
+
+#Specify that we are loading training set
+dl = data.DataLoader(ds, batch_size=bsz, shuffle=False, num_workers=2, drop_last=True)	
+	
+
 for current_epoch in tqdm(range(1, num_epoch+1)):
 	for batch_idx, batch in enumerate(dl):
 		input, current_month = batch
@@ -117,9 +118,10 @@ for current_epoch in tqdm(range(1, num_epoch+1)):
 			d_fake_loss = loss_func(outputs, fake_labels)
 			d_loss = d_real_loss + d_fake_loss
 			d_loss.backward()
+			#distribute gradients averaging
+			average_gradients()
 			d_optim.step()
-			print("epoch {}, step {},  d loss = {}".format(current_epoch, k,d_loss.item()))
-		
+		print("epoch {}, step {},  d loss = {}".format(current_epoch, k,d_loss.item()))
 		
 		#train Generator
 		netD.zero_grad()
@@ -130,21 +132,9 @@ for current_epoch in tqdm(range(1, num_epoch+1)):
 		outputs = netD(g_outputs_fake).squeeze()
 		g_loss = loss_func(outputs, fake_labels)
 		g_loss.backward()
+		#distribute gradient averaging
+		average_gradients()
 		g_optim.step()
 		
 		print("epoch {}, g_loss = {}\n".format(current_epoch,g_loss.item()))
 
-
-
-#if __name == "__main__":
-#	#Number of nodes we want to use 
-#	size = 2
-#	processes = []
-#	for rank in range(size):
-#		p = Process(target=init_processes, args=(rank, size, run))
-#		p.start()
-#		processes.append(p)
-#
-#	for p in processes:
-#		p.join()
-#

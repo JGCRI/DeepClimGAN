@@ -91,7 +91,7 @@ class Normalizer:
         return mean + batch * std
 
 
-    def compute_stat_vals_per_chunk(self, data):
+    def compute_stat_vals(self, data):
         """
 	Compute intermediate results of mean, squared sum, min and max for chunk of data
 	param: data(tensor H x W x T x C)
@@ -111,21 +111,35 @@ class Normalizer:
 
 	
 
-    def normalize_tensor(self, tensor):
+    def normalize(self, data, dataset_type):
 	'''
 	Used to normalize the data
 	param: data (tensor)
 	return normalized (or standartized, depending on the channel) tensor
 	'''
+	if dataset_type not in ['train', 'dev']:
+		raise Exception('Correct dataset type is not provided. Use \'train\' or \'dev\' ')		
+
+	up = 0
+	lb = 0
+	if dataset_type == 'train'
+		lb = data.train_len
+	elif dataset_type == 'dev':
+		ub = train_len
+		lb = train_len + dev_len
+	
+	tensor = dataset.data[up:lb, :, :, :]
+	
 	for i, (var,val) in enumerate(clmt_vars.keys()):
 		norm_type = val[1]
 		if norm_type == 'stand':
-			data[-1][i] = self.standartize(tensor[-1][i])
+			tensor[-1][i] = self.standartize(tensor[-1][i])
 		elif norm_type == 'norm':
-			data[-1][i] = self.normalize(tensor[-1][i])
-
-	return data
-
+			tensor[-1][i] = self.normalize(tensor[-1][i])
+	
+	#create link in the dataset to a normalized data
+	return tensor
+	
 
 #    def compute_stat_vals(train_len, utils, files_to_idx, dats_dir):
 #
