@@ -2,10 +2,9 @@ import numpy as np
 import torch
 from Constants import clmt_vars
 
-class Normalizer: 
+class Normalizer:
 
-    def __init_(self):
-
+    def __init__(self):
         self.clmt_stats = {
             #standartize tmp
             "tas_day" : [0, 0],#mean, std
@@ -23,15 +22,16 @@ class Normalizer:
     def get_mean_std_for_channel(self, data):
         """
         """
-        mean = data.view(-1).mean()
-        std = data.view(-1).std()
+
+        mean = torch.mean(data).item()
+        std = torch.std(data).item()
         return mean, std
-	
+
     def get_min_max_for_channel(self, data):
         """
         """
-        min = data.view(-1).min()
-        max = data.view(-1).max()	
+        min = torch.min(data)
+        max = torch.max(data)
         return min, max
 
 
@@ -39,7 +39,6 @@ class Normalizer:
         """
         Normalizes  data across the dim
         param: data (tensor) H x W x T
-
         return normalized data
         """
         min = self.clmt_stats[clmt_var][0]
@@ -47,12 +46,11 @@ class Normalizer:
         x_norm = (data - min) / max
         return x_norm
 
-	
+
     def log_normalize_channel(self, data, clmt_var):
         """
 	Log normalize the data (base e)
 	param: data (tensr) H x W x T
-
 	return normalized data
         """
         x = np.log(1 + x)
@@ -63,7 +61,6 @@ class Normalizer:
         """
         Denormalizes batch of data across the dim
         param: batch (tensor) Batch of data
-
         return denormalized data
         """
         min = self.clmt_stats[clmt_var][0]
@@ -76,7 +73,6 @@ class Normalizer:
         """
         Standartizes batch of data across the dim
         param: batch (tensor) Batch of data
-
         return normalized data
         """
         mean = self.clmt_stats[clmt_var][0]
@@ -87,7 +83,6 @@ class Normalizer:
         """
         Destandartizes batch of data across the dim
         param: batch (tensor) Batch of data
-
         return destandartized data
         """
         mean = self.clmt_stats[clmt_var][0]
@@ -100,12 +95,10 @@ class Normalizer:
 	Normalizes the data
 	param: data (tensor)
 	param: dataset_type(str) type of a dataset
-
-	return normalized data 
-        """	
+	return normalized data
+        """
         if dataset_type not in ['train', 'dev']:
                 raise Exception('Correct dataset type is not provided. Use \'train\' or \'dev\' ')
-
 
         up, lb = 0, 0
         if dataset_type == 'train':
@@ -114,19 +107,18 @@ class Normalizer:
                 ub = ds.train_len
                 lb = ds.train_len + ds.dev_len
 
-        data = ds.data[up:lb,:,:,:]
-	
+        data = ds.data[:,:,:,up:lb]
+
         for i, (var, val) in enumerate(clmt_vars.items()):
                 norm_type = val[1]
-                ax = data.shape[-1]
                 if norm_type == 'stand':
-                        mean, std = self.get_mean_std_for_channel(np.take(data, i, axis=ax))
+                        mean, std = self.get_mean_std_for_channel(data[i])
                         self.clmt_stats[var] = [mean, std]
-                        data[:,:,:,i] = self.normalize_channel(np.take(data, i, axis=ax), var)
+                        data[i] = self.normalize_channel(data[i], var)
                 elif norm_type == 'norm':
-                        min, max = self.get_min_max_for_channel(np.take(data, i, axis=ax))	
+                        min, max = self.get_min_max_for_channel(data[i])
                         self.clmt_stats[var] = [min, max]
-                        data[:,:,:,i] = self.standartize_channel(np.take(data, i, axis=ax), var)
+                        data[i] = self.standartize_channel(data[i], var)
+        print(data.shape)
+        return data
 
-        return data	
- 
