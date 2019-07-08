@@ -17,8 +17,8 @@ clmt_vars = {
 #	'tasmax' : [tas_max_dir,'norm'],
 #	'rhsmin' : [rhs_min_dir,''],
 #	'rhsmax' : [rhs_max_dir,''],
-#	'rhs' : [rhs_day_dir,'norm'],
-#	'huss' : [huss_dir,'']
+#	'rhs' : [rhs_day_dir,'norm'],#logistic transformation
+#	'huss' : [huss_dir,'']#0s are very unlikely 
 
 
 }

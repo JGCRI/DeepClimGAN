@@ -17,7 +17,7 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 #default params
 lat = 128
 lon = 256
-n_days = 30
+n_days = 32
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5

@@ -24,7 +24,6 @@ def weights_init(m):
 	return: None
 	"""
 	classname = m.__class__.__name__
-	print(classname)
 	if classname.find('Conv') != -1:
 	        m.weight.data.normal_(0.0, 0.02)
 	elif classname.find('BatchNorm') != -1:
@@ -113,7 +112,10 @@ for current_epoch in range(1, num_epoch+1):
 			high_res_context = high_res_context.reshape(bsz, context_length*channels, lon, lat)
 			avg_context = torch.mean(avg_context, -1)
 			fake_inputs = netG(z, avg_context, high_res_context)
-			outputs = netD(fake_inputs).view(batch_size, h * w * ch)
+			print(fake_inputs.shape, avg_context.shape, high_res_context.shape)
+			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
+			#feed fake input augmented with the context to D
+			outputs = netD(fake_input_with_ctxt).view(batch_size, h * w * ch)
 			d_fake_loss = loss_func(outputs, fake_labels)
 			d_loss = -(d_real_loss + d_fake_loss)
 			d_loss.backward()

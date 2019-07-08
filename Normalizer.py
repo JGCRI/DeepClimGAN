@@ -119,6 +119,5 @@ class Normalizer:
                         min, max = self.get_min_max_for_channel(data[i])
                         self.clmt_stats[var] = [min, max]
                         data[i] = self.standartize_channel(data[i], var)
-        print(data.shape)
         return data
 
