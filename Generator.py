@@ -46,7 +46,7 @@ class Generator(nn.Module):
 		
 		#block 5
 		self.upconv5 = upconv3d(64+8+4, n_channels)
-		self.tanh = nn.Tanh()
+		#self.tanh = nn.Tanh()
 
 
 
@@ -97,6 +97,7 @@ class Generator(nn.Module):
 				
 		#block5
 		x = self.upconv5(x)
-		out = self.tanh(x)
+		#out = self.tanh(x)
+		out = x
 		return out
 

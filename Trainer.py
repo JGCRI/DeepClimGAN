@@ -13,8 +13,8 @@ from tqdm import tqdm
 from torch.autograd import Variable
 
 
-#device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cpu")
 def weights_init(m):
 	"""
 	Custom weights initialization called on Generator and Discriminator
@@ -42,7 +42,7 @@ data_dir = '../clmt_data/'
 train_pct = 0.7
 #Percent of data to use at all
 data_pct = 1
-
+n_days = 32
 #dimension of Gaussian distribution to sample noise from
 z_shape = 100
 #number of iterations to update Discrimnator (default = 1)
@@ -51,7 +51,7 @@ k = 1
 apply_norm = True
 
 num_epoch = 5
-batch_size = 1
+batch_size = 16
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 l1_lambda = 10
 lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
@@ -65,10 +65,10 @@ netG.apply(weights_init)
 
 
 #use all possible GPU cores available
-#if torch.cuda.device_count() > 1:
-#    print("Using ", torch.cuda.device_count(), "GPUs!")
-#    netD = nn.DataParallel(netD)
-#    netG = nn.DataParallel(netG)
+if torch.cuda.device_count() > 1:
+    print("Using ", torch.cuda.device_count(), "GPUs!")
+    netD = nn.DataParallel(netD)
+    netG = nn.DataParallel(netG)
 netD.to(device)
 netG.to(device)
 
@@ -88,53 +88,64 @@ if apply_norm:
 
 
 #Specify that we are loading training set
-dl = data.DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
-
+dl = data.DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=2, drop_last=True)
+sigm = nn.Sigmoid()
 
 
 for current_epoch in range(1, num_epoch+1):
 	for batch_idx, batch in enumerate(dl):
-		current_month, avg_context, high_res_context = batch
+		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
+		
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
+		current_month = current_month.to(device)
+		avg_context = avg_context.to(device)
+		high_res_context = high_res_context.to(device)
 		input = ds.build_input_for_D(current_month, avg_context, high_res_context)
 		#move batch to GPU
-		input = input.to(device)
-
+		#input = input.to(device)
+		
+		z = ds.get_noise(z_shape, batch_size)
+		
+		#1. Train Discriminator on real+fake
 		for i in range(k):
 			netD.zero_grad()
 			netG.zero_grad()
+			
+			#1A. Train D on real
 			outputs = netD(input)
 			bsz, ch, h, w, t = outputs.shape
 			outputs = outputs.view(bsz, h * w * t)
 			d_real_loss = loss_func(outputs, real_labels)
-			z = ds.get_noise(z_shape, batch_size)
+			
+			#1B. Train D on fake
 			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
-			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)			
+			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G).detach() # detach to avoid training G on these labels			
 			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 			#feed fake input augmented with the context to D
 			outputs = netD(fake_input_with_ctxt)
 			outputs = outputs.view(batch_size, h * w * t)
 			d_fake_loss = loss_func(outputs, fake_labels)
+
+			#accumulate losses for real and fake, update params
 			d_loss = -(d_real_loss + d_fake_loss)
 			d_loss.backward()
 			d_optim.step()
-		print("epoch {}, step {},  d loss = {}".format(current_epoch, k,d_loss.item()))
+		print("epoch {}, step {},  batch_idx {}, d loss = {}".format(current_epoch, i, batch_idx,  d_loss.item()))
 		
 		
-		#train Generator
+		#2. Train Generator on D's response (but don't train D on these labels)
 		netD.zero_grad()
 		netG.zero_grad()
-		noise = ds.get_noise(z_shape, batch_size)
 		high_res_for_G, avg_ctxt_for_g = ds.reshape_context_for_G(avg_context, high_res_context)
-		g_outputs_fake = netG(noise, avg_ctxt_for_G, high_res_for_G)
+		g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
 		d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
 		outputs = netD(d_input)
 		bsz, c, h, w, t = outputs.shape
 		outputs = outputs.view(bsz, h * w * t)
-		g_loss = (-1) * loss_func(outputs, fake_labels)
-		g_loss.backward()
+		g_loss = (-1) * loss_func(outputs, fake_labels)#compute loss for G
+		g_loss.backward()#only optimize G's parameters
 		g_optim.step()
 		
-		print("epoch {}, g_loss = {}\n".format(current_epoch,g_loss.item()))
+		print("epoch {}, batch_idx {}, g_loss = {}\n".format(current_epoch, batch_idx, g_loss.item()))
 

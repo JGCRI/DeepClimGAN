@@ -24,7 +24,8 @@ class Discriminator(nn.Module):
 			batchNorm5d(512, 1e-3),
 			lrelu(0.2),
 			conv3d(512,1))
-
+		
+		
 	def forward(self, x):
 		out = self.model(x)
 		return out

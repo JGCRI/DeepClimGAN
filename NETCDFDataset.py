@@ -36,7 +36,6 @@ class NETCDFDataset(data.Dataset):
 
 		self.data, self.len  = self.build_dataset(data_dir, data_pct)
 		self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)
-
 		#will be initialized later
 		self.normalized_train = None
 		self.normalized_dev = None
@@ -51,7 +50,6 @@ class NETCDFDataset(data.Dataset):
 	def __getitem__(self, idx):
 		"""
 		Extracts one datapoint, which is one month of records.
-		Combines all the context needed for network
 		param: idx (int) batch idx
 
 		return:
@@ -62,7 +60,9 @@ class NETCDFDataset(data.Dataset):
 		train = self.normalized_train
 		#first 5 days are reserved for the context
 		start = context_window
-		current_month = train[:, :, : , (start + idx):(start + n_days + idx)]#output size is N_channels x H x W x 30
+		if start + n_days + idx == self.train_len:
+			return None
+		current_month = train[:, :, : , (start + idx):(start + n_days + idx)]#output size is N_channels x H x W x 32
 		high_res_context = train[:, :, :, idx:(start + idx)]
 
 		#get context
@@ -72,8 +72,12 @@ class NETCDFDataset(data.Dataset):
 		avg_p = self.expand_map(current_month[pr_idx,:,:,:], n_days, context_window)
 		avg_t = self.expand_map(current_month[tas_idx,:,:,:], n_days, context_window)
 		avg_context = torch.cat([avg_p, avg_t], dim=0)
-		return current_month, avg_context, high_res_context
-
+		batch = {"curr_month" : current_month,
+			"avg_ctxt" : avg_context,
+			"high_res" : high_res_context}
+		
+		return batch
+		
 
 	def export_netcdf(self,filename, var_name):
 		"""
