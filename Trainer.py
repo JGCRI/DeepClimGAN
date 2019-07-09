@@ -13,8 +13,8 @@ from tqdm import tqdm
 from torch.autograd import Variable
 
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-#device = torch.device("cpu")
+#device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 def weights_init(m):
 	"""
 	Custom weights initialization called on Generator and Discriminator
@@ -51,7 +51,7 @@ k = 1
 apply_norm = True
 
 num_epoch = 5
-batch_size = 16
+batch_size = 2
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 l1_lambda = 10
 lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
@@ -65,10 +65,10 @@ netG.apply(weights_init)
 
 
 #use all possible GPU cores available
-if torch.cuda.device_count() > 1:
-    print("Using ", torch.cuda.device_count(), "GPUs!")
-    netD = nn.DataParallel(netD)
-    netG = nn.DataParallel(netG)
+#if torch.cuda.device_count() > 1:
+#    print("Using ", torch.cuda.device_count(), "GPUs!")
+#    netD = nn.DataParallel(netD)
+#    netG = nn.DataParallel(netG)
 netD.to(device)
 netG.to(device)
 
@@ -88,14 +88,23 @@ if apply_norm:
 
 
 #Specify that we are loading training set
-dl = data.DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=2, drop_last=True)
+dl = data.DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
 sigm = nn.Sigmoid()
+dl_iter = iter(dl)
+
+#TODO: count number of iterations
+iterations = 10
 
 
 for current_epoch in range(1, num_epoch+1):
-	for batch_idx, batch in enumerate(dl):
-		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
+	for j in range(1, iterations + 1):
+		try:
+			batch = next(dl_iter)
+		except StopIteration:
+			dl_iter = iter(dl)
+			batch = next(dl_iter)
 		
+		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
 		current_month = current_month.to(device)
@@ -108,7 +117,7 @@ for current_epoch in range(1, num_epoch+1):
 		z = ds.get_noise(z_shape, batch_size)
 		
 		#1. Train Discriminator on real+fake
-		for i in range(k):
+		for i in range(1, k + 1):
 			netD.zero_grad()
 			netG.zero_grad()
 			
@@ -126,12 +135,12 @@ for current_epoch in range(1, num_epoch+1):
 			outputs = netD(fake_input_with_ctxt)
 			outputs = outputs.view(batch_size, h * w * t)
 			d_fake_loss = loss_func(outputs, fake_labels)
-
+	
 			#accumulate losses for real and fake, update params
 			d_loss = -(d_real_loss + d_fake_loss)
 			d_loss.backward()
 			d_optim.step()
-		print("epoch {}, step {},  batch_idx {}, d loss = {}".format(current_epoch, i, batch_idx,  d_loss.item()))
+		print("epoch {}, step {},  iteration {}, d loss = {}".format(current_epoch, i, j,  d_loss.item()))
 		
 		
 		#2. Train Generator on D's response (but don't train D on these labels)
@@ -147,5 +156,5 @@ for current_epoch in range(1, num_epoch+1):
 		g_loss.backward()#only optimize G's parameters
 		g_optim.step()
 		
-		print("epoch {}, batch_idx {}, g_loss = {}\n".format(current_epoch, batch_idx, g_loss.item()))
-
+		print("epoch {}, iteration {}, g_loss = {}\n".format(current_epoch, j, g_loss.item()))
+	
