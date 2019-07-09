@@ -135,8 +135,22 @@ class NETCDFDataset(data.Dataset):
 		res_tsr = res_tsr.permute(3, 1, 2, 0)#C x H x W x N
 		print("The size of result tensor is {}".format(res_tsr.shape))
 		return res_tsr, data_len
+	
 
+	def reshape_context_for_G(self, avg_context, high_res_context):
+		"""
+		Reshapes contexts for Generator architecture
+		param: avg_context (tensor) Bx2xHxWx(T+context_window)
+		param: high_res_context (tensor) BxCxHxWx5 5 previous days
+		"""
+		channels, context_length = high_res_context.shape[1], high_res_context.shape[-1]
+		batch_size = avg_context.shape[0]
+		lon, lat = avg_context.shape[2], avg_context.shape[3]
+		high_res = high_res_context.reshape(batch_size, context_length*channels, lon, lat)
+		avg_ctxt = torch.mean(avg_context, -1)
+		return high_res, avg_ctxt
 
+		
 	def build_input_for_D(self, input, avg_context, high_res_context):
 		"""
 		Build input for discriminator, which is a concatenation of

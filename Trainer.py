@@ -109,24 +109,25 @@ for current_epoch in range(1, num_epoch+1):
 			outputs = outputs.view(bsz, h * w * t)
 			d_real_loss = loss_func(outputs, real_labels)
 			z = ds.get_noise(z_shape, batch_size)
-			high_res_context = high_res_context.reshape(bsz, context_length*channels, lon, lat)
-			avg_context = torch.mean(avg_context, -1)
-			fake_inputs = netG(z, avg_context, high_res_context)
-			print(fake_inputs.shape, avg_context.shape, high_res_context.shape)
+			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
+			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)			
 			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 			#feed fake input augmented with the context to D
-			outputs = netD(fake_input_with_ctxt).view(batch_size, h * w * ch)
+			outputs = netD(fake_input_with_ctxt)
+			outputs = outputs.view(batch_size, h * w * t)
 			d_fake_loss = loss_func(outputs, fake_labels)
 			d_loss = -(d_real_loss + d_fake_loss)
 			d_loss.backward()
 			d_optim.step()
 		print("epoch {}, step {},  d loss = {}".format(current_epoch, k,d_loss.item()))
-
+		
+		
 		#train Generator
 		netD.zero_grad()
 		netG.zero_grad()
 		noise = ds.get_noise(z_shape, batch_size)
-		g_outputs_fake = netG(noise, avg_context, high_res_context)
+		high_res_for_G, avg_ctxt_for_g = ds.reshape_context_for_G(avg_context, high_res_context)
+		g_outputs_fake = netG(noise, avg_ctxt_for_G, high_res_for_G)
 		d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
 		outputs = netD(d_input)
 		bsz, c, h, w, t = outputs.shape
