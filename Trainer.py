@@ -96,7 +96,7 @@ dl_iter = iter(dl)
 iterations = 10
 
 
-for current_epoch in range(1, num_epoch+1):
+for current_epoch in range(1, num_epoch + 1):
 	for j in range(1, iterations + 1):
 		try:
 			batch = next(dl_iter)
@@ -107,13 +107,14 @@ for current_epoch in range(1, num_epoch+1):
 		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
+		
+		#move tensors to devices
 		current_month = current_month.to(device)
 		avg_context = avg_context.to(device)
 		high_res_context = high_res_context.to(device)
-		input = ds.build_input_for_D(current_month, avg_context, high_res_context)
-		#move batch to GPU
-		#input = input.to(device)
 		
+		#concatenate context with the input to feed D
+		input = ds.build_input_for_D(current_month, avg_context, high_res_context)
 		z = ds.get_noise(z_shape, batch_size)
 		
 		#1. Train Discriminator on real+fake

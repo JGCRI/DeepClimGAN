@@ -30,8 +30,8 @@ class Normalizer:
     def get_min_max_for_channel(self, data):
         """
         """
-        min = torch.min(data)
-        max = torch.max(data)
+        min = torch.min(data).item()
+        max = torch.max(data).item()
         return min, max
 
 
@@ -53,8 +53,8 @@ class Normalizer:
 	param: data (tensr) H x W x T
 	return normalized data
         """
-        x = np.log(1 + x)
-        return x
+        data = np.log(1 + data)
+        return data
 
 
     def denormalize(self, batch, clmt_var):

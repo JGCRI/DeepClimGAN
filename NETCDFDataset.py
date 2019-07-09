@@ -60,8 +60,6 @@ class NETCDFDataset(data.Dataset):
 		train = self.normalized_train
 		#first 5 days are reserved for the context
 		start = context_window
-#		if start + n_days + idx == self.train_len:
-#			return None
 		current_month = train[:, :, : , (start + idx):(start + n_days + idx)]#output size is N_channels x H x W x 32
 		high_res_context = train[:, :, :, idx:(start + idx)]
 		#get context
@@ -207,7 +205,6 @@ class NETCDFDataset(data.Dataset):
 			s = m.sample().unsqueeze_(0)
 			samples.append(s)
 		m = torch.cat(samples, dim=0)
-		#m = m.sample().unsqueeze_(0).repeat(batch_size,1)
 		return m
 
 
