@@ -20,17 +20,12 @@ class Normalizer:
 
 
     def get_mean_std_for_channel(self, data):
-        """
-        """
-
         mean = torch.mean(data).item()
         std = torch.std(data).item()
         return mean, std
 
     def get_min_max_for_channel(self, data):
-        """
-        """
-        min = torch.min(data).item()
+        min = torch.min(data).item()	
         max = torch.max(data).item()
         return min, max
 
@@ -47,14 +42,15 @@ class Normalizer:
         return x_norm
 
 
-    def log_normalize_channel(self, data, clmt_var):
+    def log_normalize_channel(self, data):
         """
 	Log normalize the data (base e)
 	param: data (tensr) H x W x T
 	return normalized data
         """
-        data = np.log(1 + data)
-        return data
+	
+        x = np.log(1 + data)
+        return x
 
 
     def denormalize(self, batch, clmt_var):
@@ -111,13 +107,11 @@ class Normalizer:
 
         for i, (var, val) in enumerate(clmt_vars.items()):
                 norm_type = val[1]
-                if norm_type == 'stand':
-                        mean, std = self.get_mean_std_for_channel(data[i])
-                        self.clmt_stats[var] = [mean, std]
-                        data[i] = self.normalize_channel(data[i], var)
+                if norm_type == 'log_norm':
+                        data[i] = self.log_normalize_channel(data[i])
                 elif norm_type == 'norm':
                         min, max = self.get_min_max_for_channel(data[i])
                         self.clmt_stats[var] = [min, max]
-                        data[i] = self.standartize_channel(data[i], var)
+                        data[i] = self.normalize_channel(data[i], var)
         return data
 

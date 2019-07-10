@@ -11,7 +11,7 @@ pr_day_dir = 'pr_day/'
 
 #value: [dir_name, normalization_type]
 clmt_vars = {
-	'pr' : [pr_day_dir,'stand'],
+	'pr' : [pr_day_dir,'log_norm'],
 	'tas' : [tas_day_dir,'norm'],
 #	'tasmin' : [tas_min_dir,'norm'],
 #	'tasmax' : [tas_max_dir,'norm'],

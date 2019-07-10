@@ -14,17 +14,20 @@ class Generator(nn.Module):
 	def __init__(self, h, w, t, ch, batch_size):
 		super(Generator, self).__init__()
 		self.pool = pool2d()
-
-		#block 1
+		self.relu = relu()
+		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
+	
+		
+		#block 0
 		self.fc1 = fc(100, 512)
 		self.fc2 = fc(512, 4096)
+		
+		#block 1
 		self.upconv1 = upconv3d(128, 512, 2, 2, 0)
-		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
 		self.init1 = conv2d(init_ctxt_channel_size, 64, 8, 8, 0)
 		#number 2 is two average map (precipitation and temperature)
 		self.avg1 = conv2d(2, 32, 8, 8, 0)
 		self.batchNorm5d_1 = batchNorm5d(512+64+32)
-		self.relu = relu()
 		
 		#block 2
 		self.upconv2 = upconv3d(512+64+32, 256, 2, 2, 0)
@@ -46,7 +49,6 @@ class Generator(nn.Module):
 		
 		#block 5
 		self.upconv5 = upconv3d(64+8+4, n_channels)
-		#self.tanh = nn.Tanh()
 
 
 
@@ -60,16 +62,21 @@ class Generator(nn.Module):
 		param: avg_context (tensor)
 		param: high_res_context (tensor)
 		"""
-		
-		#block 1
+
+
+		#block 0
 		batch_size = x.shape[0]
 		x = self.fc2(self.fc1(x)).reshape(batch_size, 128, 4, 8, 1)
+		
+		
+		#block 1
 		x = self.upconv1(x)
 		rep_factor = x.shape[-1] #time dimension of x, we should make contexts to match this size
 		init = self.pool(self.init1(high_res_context)).unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
 		avg = self.pool(self.avg1(avg_context)).unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
 		x = torch.cat([x, avg, init], dim=1)#concat across feature channels
-		x = self.relu(self.batchNorm5d_1(x))
+		#x = self.relu(self.batchNorm5d_1(x))
+		x = self.relu(x)
 		
 		#block 2
 		x = self.upconv2(x)
@@ -77,15 +84,17 @@ class Generator(nn.Module):
 		avg = self.pool(self.avg2(avg_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		init = self.pool(self.init2(high_res_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg, init],dim=1)
-		x = self.relu(self.batchNorm5d_2(x))
-
+		#x = self.relu(self.batchNorm5d_2(x))
+		x = self.relu(x)
+		
 		#block3
 		x = self.upconv3(x)
 		rep_factor = x.shape[-1]
 		avg = self.pool(self.avg3(avg_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		init = self.pool(self.init3(high_res_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg, init],dim=1)
-		x = self.relu(self.batchNorm5d_3(x))
+		#x = self.relu(self.batchNorm5d_3(x))
+		x = self.relu(x)
 		
 		#block4
 		x = self.upconv4(x)
@@ -93,11 +102,11 @@ class Generator(nn.Module):
 		avg = self.avg4(avg_context).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		init = self.init4(high_res_context).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg, init],dim=1)
-		x = self.relu(self.batchNorm5d_4(x))
+		#x = self.relu(self.batchNorm5d_4(x))
+		x = self.relu(x)
 				
 		#block5
 		x = self.upconv5(x)
-		#out = self.tanh(x)
 		out = x
 		return out
 

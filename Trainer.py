@@ -48,8 +48,8 @@ z_shape = 100
 k = 1
 #normalize data
 apply_norm = True
-
 num_epoch = 5
+#self-explanatory
 batch_size = 2
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 l1_lambda = 10
@@ -130,32 +130,34 @@ for current_epoch in range(1, num_epoch + 1):
 			
 			#1B. Train D on fake
 			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
-			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G).detach() # detach to avoid training G on these labels			
+			
+			# TODO:detach to avoid training G on these labels: should we?			
+
+			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 			#feed fake input augmented with the context to D
-			outputs = netD(fake_input_with_ctxt)
-			outputs = outputs.view(batch_size, h * w * t)
+			outputs = netD(fake_input_with_ctxt).view(batch_size, h * w * t)
 			d_fake_loss = loss_func(outputs, fake_labels)
 	
 			#accumulate losses for real and fake, update params
-			d_loss = -(d_real_loss + d_fake_loss)
+			d_loss = 0.5 * (d_real_loss + d_fake_loss)
 			d_loss.backward()
 			d_optim.step()
-		print("epoch {}, step {},  iteration {}, d loss = {}".format(current_epoch, i, j,  d_loss.item()))
+		print("epoch {}, step {},  iteration {}, d loss = {:0.18f}".format(current_epoch, i, j,  d_loss.item()))
 		
 		
 		#2. Train Generator on D's response (but don't train D on these labels)
 		netD.zero_grad()
 		netG.zero_grad()
-		high_res_for_G, avg_ctxt_for_g = ds.reshape_context_for_G(avg_context, high_res_context)
+		high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
 		g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
 		d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
 		outputs = netD(d_input)
 		bsz, c, h, w, t = outputs.shape
 		outputs = outputs.view(bsz, h * w * t)
-		g_loss = (-1) * loss_func(outputs, fake_labels)#compute loss for G
+		g_loss = loss_func(outputs, fake_labels)#compute loss for G
 		g_loss.backward()#only optimize G's parameters
 		g_optim.step()
 		
-		print("epoch {}, iteration {}, g_loss = {}\n".format(current_epoch, j, g_loss.item()))
+		print("epoch {}, iteration {}, g_loss = {:0.18f}\n".format(current_epoch, j, g_loss.item()))
 	
