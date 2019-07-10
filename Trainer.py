@@ -12,7 +12,6 @@ import torch.nn as nn
 from tqdm import tqdm
 from torch.autograd import Variable
 
-
 #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 def weights_init(m):
@@ -57,6 +56,8 @@ l1_lambda = 10
 lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
 context_length = 5
 
+shuffle_batches = False
+
 
 netD = Discriminator()
 netG = Generator(lon, lat, context_length, channels, batch_size)
@@ -88,12 +89,11 @@ if apply_norm:
 
 
 #Specify that we are loading training set
-dl = data.DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
-sigm = nn.Sigmoid()
+dl = data.DataLoader(ds, batch_size=batch_size, shuffle=shuffle_batches, num_workers=1, drop_last=True)
 dl_iter = iter(dl)
 
-#TODO: count number of iterations
-iterations = 10
+#number of iterations == number of batches
+iterations = 70
 
 
 for current_epoch in range(1, num_epoch + 1):
