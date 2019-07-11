@@ -108,3 +108,8 @@ venv.bak/
 
 # LaTex generated files
 *.aux
+*.pdf
+
+# HTML renderings of documents
+*.html
+

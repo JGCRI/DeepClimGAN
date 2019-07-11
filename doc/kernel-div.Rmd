@@ -1,0 +1,190 @@
+---
+title: "Kernel methods for measuring differences in joint probability distributions"
+author: "Robert Link"
+date: "7/11/2019"
+output:
+  pdf_document: default
+  html_document: default
+header-includes: \usepackage{amsmath}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(ggthemes)
+set.seed(867-5309)
+```
+
+## The role of the kernel
+
+After reading (some of) the reference material that Sasha sent out, I think I understand 
+a little better how the kernel methods work.  I was thinking that the purpose of the kernel
+was to measure certain kinds of features, kind of like the kernels in a convolutional network.
+That isn't what is happening at all.
+
+Instead, the points from the real dataset and the points
+in the generated dataset are acting as estimators of the probability density over the configuration 
+space.  (This is the same logic that underlies bootstrap sampling.)  If we only do that, then 
+the implied probability distribution is a collection of Dirac delta functions.  E.g., for a dataset
+$D$,
+\begin{equation}
+P(x) = \sum_{x=1}^{N} \delta(x-D_i).
+\end{equation}
+This is fine for computing expectation values over the distribution (again, as in bootstrapping), but
+it's not good for measuring the difference between two distributions because $P(x) = 0$ for any $x$
+that doesn't _exactly_ match one of the $D_i$.
+
+The solution is to use a kernel function that spreads out the probability mass of the samples over a
+range of nearby $x$ values.  For example,
+\begin{align}
+P(x) &= \sum_{x=1}^{N} K(x,D_i).\\
+K(x,x') &= \exp\left(\frac{(x-x')^2}{2\sigma^2}\right).
+\end{align}
+Now samples $G_i$ that are are off by just a little bit from one of the $D_i$ will still be seen as
+having relatively high probability.
+
+```{r witnessfn_example, fig.width=7, fig.align='center', fig.cap="Example of two distributions that are nearly identical.  If we don't spread the points out a little, our divergence metric has no way of knowing that the points in the two distributions are very close together.  The kernel spreads the probability mass of the samples so that they overlap nearby points.  The light blue curve is the ``witness'' function, which serves as the basis for the discrepancy measures we will be discussing."}
+d1 <- rnorm(5)
+d2 <- d1+0.05
+d1den <- density(d1, bw=0.05)
+d2den <- density(d2, bw=0.05)
+witx <- d1den$x
+wity <- d1den$y - approx(d2den$x, d2den$y, d1den$x, rule=2)$y
+ggplot() + geom_point(aes(x=d1, y=0), color='blue') + geom_point(aes(x=d2, y=0), color='red') +
+    geom_line(aes(x=d1den$x, y=d1den$y), color='blue') + geom_line(aes(x=d2den$x, y=d2den$y), color='red') +
+    geom_line(aes(x=witx, y=wity), color='lightblue') +
+    labs(x='x', y='P(x)') +
+    theme_solarized_2(light = FALSE)
+```
+
+Our examples so far have been one-dimensional distributions (and they will remain so throughout the 
+discussion to make plotting easier); however, all of this generalizes easily to multidimensions.  
+Indeed, it is in higher dimensions that this representation really comes into its own, since over
+the vast majority of the high-dimensional configuration space $P(x) \approx 0$.
+
+There is still a little bit of an art associated with designing the kernel.  In
+our Gaussian example you still have to decide how wide to make it, and you have
+to pick the shape of the kernel.  I expect that the exact radial profile of the
+kernel doesn't matter much (apart from the scale), but it might be useful to make the kernel
+non-axisymmetric.  This choice would allow the metric to be more forgiving of
+errors in some directions in the parameter space than others, reflecting the 
+idea that we expect the true underlying probability distribution to have certain
+symmetries (e.g., translational symmetry in time or space.)
+
+From here, we could compute various sorts of discrepancy measures, such as the K-L divergence. It
+will be convenient to define the _witness function_ as the difference of the two probability 
+distributions; $w(x) = P(x) - Q(x)$.  In the sections to come we will see that we can use the witness 
+function to define several divergence statistics that have known asymptotic distributions under
+the null hypothesis that $P(x) \equiv Q(x)$.
+
+## Divergence measures
+### Maximum mean discrepancy (MMD)
+
+The MMD statistic is defined as the mean magnitude of the witness function.
+\begin{align}
+\hat{M}^2 &= \lvert\lvert w(x)\rvert\rvert^2\\
+          &= \frac{2}{N(N-1)} \sum_{i\not=j} k(x_i,x_j) + \frac{2}{N(N-1)} \sum_{i\not=j} k(y_i, y_j) - \frac{4}{N^2} \sum_{i,j} k(x_i,y_j)
+\end{align}
+For $P(x) \equiv Q(x)$, $M^2=0$, and it gets larger as $P(x)$ gets further from $Q(x)$.  The exact
+value, however, depends on the choice of kernel.  
+
+Sutherland, et al. (2016) derive an algorithm for selecting a kernel by 
+maximizing the power of a hypothesis test using the statistic.  (However, the
+power of the test depends on how different the two distributions are, and it's
+not clear to me what they assumed about this.)  The derivation is rather
+technical and relies on asymptotic distributions of $M^2$ in both the $P\equiv
+Q$ and $P\not=Q$ cases.  They define the kernel nonparametrically through three
+matrices, $K_{XY}$, $\tilde{K}_{XX}$, and $\tilde{K}_{YY}$, which give the
+values of $k(x_i, y_j)$, $k(x_i, x_j)$, and $k(y_i, y_j)$ respectively. For
+$\tilde{K}_{XX}$ and $\tilde{K}_{YY}$, the diagonal elements are defined to be
+zero, reflecting the $i\not=j$ condition in the summations above. (Presumably 
+this is also the reason for the notational difference.)  The optimal kernel is 
+the one that maximizes
+\begin{equation}
+\frac{\hat{M}^2}{\sqrt{\hat{V}_m}}
+\end{equation}
+$\hat{V}_m$ is the estimator for the population variance of $\hat{M}^2$.  It is given by equation (5)
+in Sutherland, et al. (2016), which I won't even try to reproduce here because it is a _beast_.  It 
+involves a bunch of products and Frobenius norms of the $K$ matrices described above.  Good times, all
+around.  There is code to calculate it available at https://github.com/dougalsutherland/opt-mmd,
+though it's not clear whether that would be useable right out of the box for us.
+
+Once you have the kernel in place, you can do hypothesis testing in the usual way.  Sort of.  It turns
+out that the asymptotic distribution for the $P\equiv Q$ case depends on the distribution $P$, so you
+have to do some Monte Carlo simulations to get an empirical hypothesis test threshold.  The other problem
+is that statistical hypothesis testing doesn't really tell you when the null hypothesis is _true_; it
+just tells you that you can't necessarily conclude that it's _false_.  We talk about this problem 
+a bit in the fldgen paper (Link, et al., 2019).  Maybe we could apply some of that methodology
+here; however, we would have to understand the assumptions underlying their estimate of the test
+power in order to do so.
+
+### Mean Embeddings (ME) statistic
+
+In the slides for a presentation, Gretton (2016) defines the ``ME Statistic''.  
+The idea behind this statistic is that you find the value of $x$ (in the
+univariate case, $\mathbf{x}$ in the multivariate case) that maximizes the relative error statistic
+\begin{equation}
+\hat{\lambda} = N \frac{w(x)}{\sigma_{\text{T}(x)}^2}.
+\end{equation}
+The $w(x)$ is just our witness function from above, and $\sigma_{\text{T}}$ is the variance of $w$, 
+which is equal to the sum of the variances of the two distributions $\sigma^2_P + \sigma^2_Q$.  Gretton
+doesn't go into detail about how to calculate those variances, which are a little tricky because $P$
+and $Q$ are probability _densities_, but looking at his illustrative figures, it appears that he just
+bins the samples to convert density to mass, and then the estimate of the variance is just expected
+number of samples in the region (though it's not clear what you do in regions of zero density for both
+distributions; it looks like he just ignores them.)
+
+Once you've constructed $\lambda(x)$, you find $\max_x \lambda(x)$, and that's
+your statistic.  To me this test is a little evocative of the Kolmogorov-Smirnov
+test, which takes the maximum discrepancy between the CDF values of two
+distributions.  The difference is that this one operates on the joint
+probability density instead of the CDF, which is useful because the latter is
+hard to define for a multivariate distribution.
+
+The slides don't actually describe how to find the threshold value for the test, nor how to select
+the kernel function (or whether the selection of the kernel function even matters.)  There is code 
+available (https://github.com/wittawatj/interpretable-test), and a paper (Jitkrittum, et al., 2016)
+that might have more details.  That paper also gives another test called SCF, which I haven't looked
+at yet.
+
+_Update_: I did skim that paper, and it looks like the statistic is asymptotically $\chi^2$ distributed,
+which is outstanding.  They also claim that the kernel need only be positive definite, which is 
+surprising to me.  I am skeptical; we will want to delve into _why_ the details of the kernel don't
+matter.  I may add some simulation experiments with known distributions too.
+
+## Conclusions
+
+The question we have to answer is, which, if either, of these tests will be sufficient for our purposes,
+and if both would serve, which one should we go with?  
+
+The MMD test seems likely to give us what we need.  It has a well-defined procedure to calculate, and
+it can be converted into a hypothesis test, which gives us a way to interpret the statistic in 
+absolute terms (as contrasted with only being able to compare the results from two or more emulator 
+algorithms, which is the problem we had with Ted's paper.)  The main difficulty with MMD is that it
+looks like it will be a lot of effort to calculate.
+
+The ME test statistic looks a lot easier to calculate, though that may be an
+illusion, depending on whether the test really is insensitive to the exact form
+of $k$. If it is, then this seems like a huge time savings (both programming
+time and computing time) as compared to MMD.  Even if there is no catch, we will
+have to get some estimate of the power of the test under a presumed _de minimus_
+discrepancy in the joint distributions.  That's easy enough to do via Monte
+Carlo, but defining a _de minimus_ discrepancy might be a little tricky.  We did
+something like that in the fldgen v.1 paper, but that was for a univariate
+distribution, so we will have to figure out how to generalize to the
+multivariate case.
+
+Therefore, it seems like our best course is to dig into the ME paper and example
+code and see if it really is too good to be true.  If not, then we can proceed
+with implementation and the analysis of the test power. If it is, then we still
+have the MMD test to fall back on.
+
+## References
+Gretton, A. (2016). Learning features to compare distributions.  _NIPS 2016 workshop on adversarial learning_, http://www.gatsby.ucl.ac.uk/~gretton/papers/testing_workshop.pdf
+
+Jitkrittum, W., Szabó, Z., Chwialkowski, K. P., & Gretton, A. (2016). Interpretable distribution features with maximum testing power. In _Advances in Neural Information Processing Systems_ (pp. 181-189).
+
+Link, R., Snyder, A., Lynch, C., Hartin, C., Kravitz, B., & Bond-Lamberty, B. (2019). Fldgen v1. 0: an emulator with internal variability and space–time correlation for Earth system models. _Geoscientific Model Development_, 12.
+
+Sutherland, D. J., Tung, H. Y., Strathmann, H., De, S., Ramdas, A., Smola, A., & Gretton, A. (2016). Generative models and model criticism via optimized maximum mean discrepancy. _arXiv preprint_ arXiv:1611.04488.
+
