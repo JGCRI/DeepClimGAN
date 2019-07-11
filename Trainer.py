@@ -11,6 +11,8 @@ from Constants import clmt_vars
 import torch.nn as nn
 from tqdm import tqdm
 from torch.autograd import Variable
+from DataSampler import DataSampler
+
 
 #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
@@ -50,13 +52,12 @@ k = 1
 apply_norm = True
 num_epoch = 5
 #self-explanatory
-batch_size = 2
+batch_size = 4
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 l1_lambda = 10
 lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
 context_length = 5
-
-shuffle_batches = False
+context_window = 5
 
 
 netD = Discriminator()
@@ -89,22 +90,26 @@ if apply_norm:
 
 
 #Specify that we are loading training set
-dl = data.DataLoader(ds, batch_size=batch_size, shuffle=shuffle_batches, num_workers=1, drop_last=True)
+sampler = DataSampler(ds, batch_size, context_window, n_days)
+#r_sampler = data.RandomSampler(sampler)
+b_sampler = data.BatchSampler(sampler, batch_size=batch_size, drop_last=True)
+dl = data.DataLoader(ds, batch_sampler=b_sampler,num_workers=0)
 dl_iter = iter(dl)
 
-#number of iterations == number of batches
-iterations = 70
-
+iterations = 100
 
 for current_epoch in range(1, num_epoch + 1):
 	for j in range(1, iterations + 1):
 		try:
 			batch = next(dl_iter)
 		except StopIteration:
+			#end of epoch -> shuffle dataset and reinitialize iterator
+			sampler.permute()
 			dl_iter = iter(dl)
 			batch = next(dl_iter)
 		
 		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
+		continue
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
 		

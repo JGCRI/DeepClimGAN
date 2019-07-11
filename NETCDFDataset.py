@@ -21,7 +21,7 @@ n_days = 32
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
-
+batch_size = 4
 data_dir = '../clmt_data/'
 
 class NETCDFDataset(data.Dataset):
@@ -57,11 +57,13 @@ class NETCDFDataset(data.Dataset):
 		avg_context(tensor) HxWx(T+context_window)x2 avg maps expanded to match the time dimension
 		high_res_context (tensor) HxWxcontext_windowxC N previous days
 		"""
-		train = self.normalized_train
 		#first 5 days are reserved for the context
 		start = context_window
-		current_month = train[:, :, : , (start + idx):(start + n_days + idx)]#output size is N_channels x H x W x 32
-		high_res_context = train[:, :, :, idx:(start + idx)]
+		print(idx)
+
+		train = self.normalized_train
+		current_month = train[:, :, : , idx:(idx + n_days)] #output size is N_channels x H x W x 32
+		high_res_context = train[:, :, :, (idx - context_window):idx]
 		#get context
 		keys = list(clmt_vars.keys())
 		pr_idx = keys.index('pr')
