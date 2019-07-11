@@ -184,7 +184,7 @@ Gretton, A. (2016). Learning features to compare distributions.  _NIPS 2016 work
 
 Jitkrittum, W., Szabó, Z., Chwialkowski, K. P., & Gretton, A. (2016). Interpretable distribution features with maximum testing power. In _Advances in Neural Information Processing Systems_ (pp. 181-189).
 
-Link, R., Snyder, A., Lynch, C., Hartin, C., Kravitz, B., & Bond-Lamberty, B. (2019). Fldgen v1. 0: an emulator with internal variability and space–time correlation for Earth system models. _Geoscientific Model Development_, 12.
+Link, R., Snyder, A., Lynch, C., Hartin, C., Kravitz, B., & Bond-Lamberty, B. (2019). Fldgen v1. 0: an emulator with internal variability and space–time correlation for Earth system models. _Geoscientific Model Development_, 12(4), 1477-1489.
 
 Sutherland, D. J., Tung, H. Y., Strathmann, H., De, S., Ramdas, A., Smola, A., & Gretton, A. (2016). Generative models and model criticism via optimized maximum mean discrepancy. _arXiv preprint_ arXiv:1611.04488.
 
