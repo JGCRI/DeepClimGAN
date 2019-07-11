@@ -29,12 +29,11 @@ class DataSampler(Sampler):
 		batch_size = self.batch_size
 		n_batches = (ub - lb) // batch_size + 1
 		indices = [i for i in range(lb, ub + 1)]
-		print(indices)
 		return indices		
 	
 
 	def permute(self):
-		self.indices = np.random.permutation(len(self.indices))
+		self.indices = np.random.permutation(self.indices)
 		
 
 	def __iter__(self):

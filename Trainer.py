@@ -96,20 +96,18 @@ b_sampler = data.BatchSampler(sampler, batch_size=batch_size, drop_last=True)
 dl = data.DataLoader(ds, batch_sampler=b_sampler,num_workers=0)
 dl_iter = iter(dl)
 
-iterations = 100
 
 for current_epoch in range(1, num_epoch + 1):
-	for j in range(1, iterations + 1):
+	while True:
 		try:
 			batch = next(dl_iter)
 		except StopIteration:
 			#end of epoch -> shuffle dataset and reinitialize iterator
 			sampler.permute()
 			dl_iter = iter(dl)
-			batch = next(dl_iter)
-		
+			break
+					
 		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
-		continue
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
 		
@@ -137,7 +135,7 @@ for current_epoch in range(1, num_epoch + 1):
 			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
 			
 			# TODO:detach to avoid training G on these labels: should we?			
-
+	
 			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 			#feed fake input augmented with the context to D
@@ -165,4 +163,5 @@ for current_epoch in range(1, num_epoch + 1):
 		g_optim.step()
 		
 		print("epoch {}, iteration {}, g_loss = {:0.18f}\n".format(current_epoch, j, g_loss.item()))
+	
 	

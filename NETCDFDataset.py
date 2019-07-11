@@ -59,7 +59,6 @@ class NETCDFDataset(data.Dataset):
 		"""
 		#first 5 days are reserved for the context
 		start = context_window
-		print(idx)
 
 		train = self.normalized_train
 		current_month = train[:, :, : , idx:(idx + n_days)] #output size is N_channels x H x W x 32
