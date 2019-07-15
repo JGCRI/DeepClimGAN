@@ -23,7 +23,6 @@ class Generator(nn.Module):
 		self.fc2 = fc(512, 4096)
 		
 		#block 1
-		#self.upconv1 = upconv3d(128, 512, 2, 2, 0)
 		self.upconv1 = upconv3d(128, 512)
 		self.init1 = conv2d(init_ctxt_channel_size, 64, 8, 8, 0)
 		#number 2 is two average map (precipitation and temperature)
@@ -32,27 +31,23 @@ class Generator(nn.Module):
 		
 		#block 2
 		self.upconv2 = upconv3d(512+64+32, 256)
-		#self.upconv2 = upconv3d(512+64+32, 256, 2, 2, 0)
 		self.init2 = conv2d(init_ctxt_channel_size, 32, 4, 4, 0)
 		self.avg2 = conv2d(2, 16, 4, 4, 0)
 		self.batchNorm5d_2 = batchNorm5d(256+16+32)
 		
 		#block 3
 		self.upconv3 = upconv3d(256+16+32, 128)
-		#self.upconv3 = upconv3d(256+16+32, 128, 2, 2, 0)
 		self.init3 = conv2d(init_ctxt_channel_size, 16, 2, 2, 0)
 		self.avg3 = conv2d(2, 8, 2, 2, 0)
 		self.batchNorm5d_3 = batchNorm5d(128+16+8)
 
 		#block 4
 		self.upconv4 = upconv3d(128+16+8, 64)
-		#self.upconv4 = upconv3d(128+16+8, 64, 2, 2, 0)
 		self.init4 = conv2d(init_ctxt_channel_size, 8, 2, 2, 0)
 		self.avg4 = conv2d(2, 4, 2, 2, 0)
 		self.batchNorm5d_4 = batchNorm5d(64+8+4)
 		
 		#block 5
-		#self.upconv5 = upconv3d(64+8+4, n_channels)
 		self.upconv5 = upconv3d(64+8+4, n_channels)
 
 
@@ -80,7 +75,6 @@ class Generator(nn.Module):
 		avg = self.pool(self.avg1(avg_context)).unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
 		x = torch.cat([x, avg, init], dim=1)#concat across feature channels
 		x = self.relu(self.batchNorm5d_1(x))
-		#x = self.relu()
 		
 		#block 2
 		x = self.upconv2(x)
@@ -89,7 +83,6 @@ class Generator(nn.Module):
 		init = self.pool(self.init2(high_res_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg, init],dim=1)
 		x = self.relu(self.batchNorm5d_2(x))
-		#x = self.relu()
 		
 		#block3
 		x = self.upconv3(x)
@@ -98,7 +91,6 @@ class Generator(nn.Module):
 		init = self.pool(self.init3(high_res_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg, init],dim=1)
 		x = self.relu(self.batchNorm5d_3(x))
-		#x = self.relu()		
 
 		#block4
 		x = self.upconv4(x)
@@ -107,7 +99,6 @@ class Generator(nn.Module):
 		init = self.init4(high_res_context).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg, init],dim=1)
 		x = self.relu(self.batchNorm5d_4(x))
-		#x = self.relu()	
 			
 		#block5
 		x = self.upconv5(x)
