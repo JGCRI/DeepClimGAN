@@ -21,7 +21,7 @@ n_days = 32
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
-batch_size = 4
+batch_size = 16
 data_dir = '../clmt_data/'
 
 class NETCDFDataset(data.Dataset):

@@ -14,19 +14,19 @@ from torch.autograd import Variable
 from DataSampler import DataSampler
 
 
-#device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cpu")
 def weights_init(m):
 	"""
 	Custom weights initialization called on Generator and Discriminator
 	All weights are initialized from a zero-centered Normal Distribution
-	with std=0.02
+	with std=0.01
 	 param: m ()
 	return: None
 	"""
 	classname = m.__class__.__name__
 	if classname.find('Conv') != -1:
-	        m.weight.data.normal_(0.0, 0.02)
+	        m.weight.data.normal_(0.0, 0.01)
 	elif classname.find('BatchNorm') != -1:
 	        m.weight.data.normal_(1.0, 0.02)
 	        m.bias.data.fill_(0)
@@ -50,14 +50,13 @@ z_shape = 100
 k = 1
 #normalize data
 apply_norm = True
-num_epoch = 5
+num_epoch = 10
 #self-explanatory
-batch_size = 4
+batch_size = 16
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 l1_lambda = 10
 lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
 context_length = 5
-context_window = 5
 
 
 netD = Discriminator()
@@ -67,10 +66,10 @@ netG.apply(weights_init)
 
 
 #use all possible GPU cores available
-#if torch.cuda.device_count() > 1:
-#    print("Using ", torch.cuda.device_count(), "GPUs!")
-#    netD = nn.DataParallel(netD)
-#    netG = nn.DataParallel(netG)
+if torch.cuda.device_count() > 1:
+    print("Using ", torch.cuda.device_count(), "GPUs!")
+    netD = nn.DataParallel(netD)
+    netG = nn.DataParallel(netG)
 netD.to(device)
 netG.to(device)
 
@@ -90,27 +89,35 @@ if apply_norm:
 
 
 #Specify that we are loading training set
-sampler = DataSampler(ds, batch_size, context_window, n_days)
-#r_sampler = data.RandomSampler(sampler)
+sampler = DataSampler(ds, batch_size, context_length, n_days)
 b_sampler = data.BatchSampler(sampler, batch_size=batch_size, drop_last=True)
-dl = data.DataLoader(ds, batch_sampler=b_sampler,num_workers=0)
+dl = data.DataLoader(ds, batch_sampler=b_sampler, num_workers=0)
 dl_iter = iter(dl)
 
 
+
+#Lists to keep track of progress:
+G_losses = []
+D_losses = []
+
+#Training loop
 for current_epoch in range(1, num_epoch + 1):
+	n_updates = 1
 	while True:
 		try:
 			batch = next(dl_iter)
 		except StopIteration:
 			#end of epoch -> shuffle dataset and reinitialize iterator
 			sampler.permute()
+			print("shuffling batches...\n")
 			dl_iter = iter(dl)
+			#start new epoch
 			break
 					
 		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
-		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype = int)), requires_grad = False)
+		#smoothing labels
+		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype=int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
-		
 		#move tensors to devices
 		current_month = current_month.to(device)
 		avg_context = avg_context.to(device)
@@ -120,48 +127,75 @@ for current_epoch in range(1, num_epoch + 1):
 		input = ds.build_input_for_D(current_month, avg_context, high_res_context)
 		z = ds.get_noise(z_shape, batch_size)
 		
-		#1. Train Discriminator on real+fake
-		for i in range(1, k + 1):
+		#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
+		if n_updates % 2 == 1:
 			netD.zero_grad()
-			netG.zero_grad()
 			
 			#1A. Train D on real
 			outputs = netD(input)
 			bsz, ch, h, w, t = outputs.shape
 			outputs = outputs.view(bsz, h * w * t)
 			d_real_loss = loss_func(outputs, real_labels)
-			
+			d_real_loss.backward()	
+		
 			#1B. Train D on fake
-			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
-			
-			# TODO:detach to avoid training G on these labels: should we?			
-	
+			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
 			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 			#feed fake input augmented with the context to D
 			outputs = netD(fake_input_with_ctxt).view(batch_size, h * w * t)
 			d_fake_loss = loss_func(outputs, fake_labels)
-	
-			#accumulate losses for real and fake, update params
-			d_loss = 0.5 * (d_real_loss + d_fake_loss)
-			d_loss.backward()
+			d_fake_loss.backward()
+
+			#Add the gradients from the all-real and all-fake batches	
+			d_loss = d_real_loss + d_fake_loss
+			
+			#Save loss for plotting later
+			D_losses.append(d_loss.item())
+
+			#Update D
 			d_optim.step()
-		print("epoch {}, step {},  iteration {}, d loss = {:0.18f}".format(current_epoch, i, j,  d_loss.item()))
+			print("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
+		else:
 		
+			#2. Train Generator on D's response: maximize log(D(G(z))
+			netG.zero_grad()
+			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
+			g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
+			d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
+			outputs = netD(d_input)
+			bsz, c, h, w, t = outputs.shape
+			outputs = outputs.view(bsz, h * w * t)
+			g_loss = loss_func(outputs, real_labels)#compute loss for G
+			g_loss.backward()#only optimize G's parameters
+			g_optim.step()
+			
+			print("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
 		
-		#2. Train Generator on D's response (but don't train D on these labels)
-		netD.zero_grad()
-		netG.zero_grad()
-		high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
-		g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
-		d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
-		outputs = netD(d_input)
-		bsz, c, h, w, t = outputs.shape
-		outputs = outputs.view(bsz, h * w * t)
-		g_loss = loss_func(outputs, fake_labels)#compute loss for G
-		g_loss.backward()#only optimize G's parameters
-		g_optim.step()
-		
-		print("epoch {}, iteration {}, g_loss = {:0.18f}\n".format(current_epoch, j, g_loss.item()))
+			#Save loss for plotting later:
+			G_losses.append(g_loss.item())
 	
-	
+		n_updates += 1
+
+#Visualize results:
+#plt.figure(figsize=(10,5))
+#plt.title("Generator and Discriminator Loss During Training")
+#plt.plot(G_losses, label="G")
+#plt.plot(D_losses, label="D")
+#plt.xlabel("iterations")
+#plt.ylabel("Loss")
+#plt.legend()
+#plt.show()
+
+#save G losses and D losses
+import csv
+with open('../g_losses.csv','w') as myfile:
+	for l in G_losses:
+		myfile.write(str(l))
+		myfile.write('\n')
+
+with open('../d_losses.csv', 'w') as myfile:
+	for l in D_losses:
+		myfile.write(str(l))
+		myfile.write('\n')
+
