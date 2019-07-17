@@ -59,7 +59,6 @@ class NETCDFDataset(data.Dataset):
 		"""
 		#first 5 days are reserved for the context
 		start = context_window
-
 		train = self.normalized_train
 		current_month = train[:, :, : , idx:(idx + n_days)] #output size is N_channels x H x W x 32
 		high_res_context = train[:, :, :, (idx - context_window):idx]
@@ -224,23 +223,4 @@ class NETCDFDataset(data.Dataset):
 		size_to_expand = n_days + context_window
 		expanded_map = torch.cat(list(torch.split(map, 1, dim=3)) * size_to_expand, dim=3)
 		return expanded_map
-
-
-# def visualize_channels(data):
-# 	"""
-# 	Plot the distribution of the data
-# 	"""
-# 	for i, (var, val) in enumerate(clmt_vars.keys()):
-# 		visualize_tensor(np.take(data, i, axis=data.shape[-1]), var_name)
-
-#
-# def visualize_channel(tensor, var_name):
-# 	"""
-# 	Plot data distribution for one channel
-# 	param: tensor: H x W x T
-# 	"""
-# 	flattened = tensor.flatten()
-# 	plot = sns.distplot(x, kde=True, rug=False)
-# 	fig = plot.get_figure()
-# 	fig.savefig('../' + var_name + '.png')
 

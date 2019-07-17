@@ -37,6 +37,37 @@ def to_variable(x, requires_grad = True):
     return Variable(x, requires_grad)
 
 
+def check_grads(model, model_name):
+	'''
+	Intended to be used to check the gradients.
+	Use before zeroing gradients out.
+	Usage:
+	
+		check_grads(netG, "Generator")
+		netG.zero_grad() )
+	'''
+	grads = []
+	for p in model.parameters():
+		if not p.grad is None:
+			grads.append(float(p.grad.mean()))
+	grads = np.array(grads)
+	#if len(grads) > 0:
+	#	print(f" Gradients mean, max  for ({model_name}) are ({grads.mean()}, {grads.max()})")
+	if len(grads) > 0:
+		return grads.mean()
+	elif len(grads) == 0:
+		return 0
+	#if grads.any() and grads.mean() > 100:
+	#	print(f"WARNING! gradients mean is over 100 ({model_name})")
+	#if grads.any() and grads.max() > 100:
+	#	print(f"WARNING! gradients max is over 100 ({model_name})")
+	
+
+
+
+
+
+
 #Default params
 data_dir = '../clmt_data/'
 #Percent of data to use for training
@@ -50,7 +81,7 @@ z_shape = 100
 k = 1
 #normalize data
 apply_norm = True
-num_epoch = 10
+num_epoch = 5
 #self-explanatory
 batch_size = 16
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
@@ -100,10 +131,15 @@ dl_iter = iter(dl)
 G_losses = []
 D_losses = []
 
+#Lists to keep track of gradients
+G_grads = []
+D_grads = []
+
 #Training loop
 for current_epoch in range(1, num_epoch + 1):
 	n_updates = 1
 	while True:
+		#sample batch
 		try:
 			batch = next(dl_iter)
 		except StopIteration:
@@ -113,24 +149,30 @@ for current_epoch in range(1, num_epoch + 1):
 			dl_iter = iter(dl)
 			#start new epoch
 			break
-					
+		
+		#unwrap the batch			
 		current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
+		
 		#smoothing labels
 		real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype=int)), requires_grad = False)
 		fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
-		#move tensors to devices
+		
+		#ship tensors to devices
 		current_month = current_month.to(device)
 		avg_context = avg_context.to(device)
 		high_res_context = high_res_context.to(device)
 		
-		#concatenate context with the input to feed D
-		input = ds.build_input_for_D(current_month, avg_context, high_res_context)
+		#sample noise
 		z = ds.get_noise(z_shape, batch_size)
 		
 		#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 		if n_updates % 2 == 1:
+			d_grad = check_grads(netD, "Discriminator")
+			D_grads.append(d_grad)
 			netD.zero_grad()
-			
+			#concatenate context with the input to feed D
+			input = ds.build_input_for_D(current_month, avg_context, high_res_context)
+
 			#1A. Train D on real
 			outputs = netD(input)
 			bsz, ch, h, w, t = outputs.shape
@@ -142,8 +184,9 @@ for current_epoch in range(1, num_epoch + 1):
 			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
 			fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 			fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
+			
 			#feed fake input augmented with the context to D
-			outputs = netD(fake_input_with_ctxt).view(batch_size, h * w * t)
+			outputs = netD(fake_input_with_ctxt.detach()).view(batch_size, h * w * t)
 			d_fake_loss = loss_func(outputs, fake_labels)
 			d_fake_loss.backward()
 
@@ -159,6 +202,8 @@ for current_epoch in range(1, num_epoch + 1):
 		else:
 		
 			#2. Train Generator on D's response: maximize log(D(G(z))
+			g_grad = check_grads(netG, "Generator")
+			G_grads.append(g_grad)
 			netG.zero_grad()
 			high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
 			g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
@@ -199,3 +244,13 @@ with open('../d_losses.csv', 'w') as myfile:
 		myfile.write(str(l))
 		myfile.write('\n')
 
+
+with open('../g_grads.csv', 'w') as myfile:
+	for g in G_grads:
+		myfile.write(str(g))
+		myfile.write('\n')
+
+with open('../d_grads.csv', 'w') as myfile:
+	for d in D_grads:
+		myfile.write(str(d))
+		myfile.write('\n')
