@@ -5,18 +5,7 @@ from Constants import clmt_vars
 class Normalizer:
 
     def __init__(self):
-        self.clmt_stats = {
-            #standartize tmp
-            "tas_day" : [0, 0],#mean, std
-            #normalize pr
-            "pr" : [0, 0],#min, max
-            #normalize relative humidity
-            "rhs" : [0, 0],
-            #normalize humidity
-            "tas_max" : [0, 0],
-            #normalize humidity
-            "tax_min" : [0, 0]
-        }
+        self.clmt_stats = {}
 
 
     def get_mean_std_for_channel(self, data):
@@ -109,9 +98,9 @@ class Normalizer:
                 norm_type = val[1]
                 if norm_type == 'log_norm':
                         data[i] = self.log_normalize_channel(data[i])
-                elif norm_type == 'norm':
-                        min, max = self.get_min_max_for_channel(data[i])
-                        self.clmt_stats[var] = [min, max]
-                        data[i] = self.normalize_channel(data[i], var)
+                elif norm_type == 'stand':
+                        mean ,std = self.get_mean_std_for_channel(data[i])
+                        self.clmt_stats[var] = [mean, std]
+                        data[i] = self.standartize_channel(data[i], var)
         return data
 

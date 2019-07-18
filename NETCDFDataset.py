@@ -22,7 +22,6 @@ n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
 batch_size = 16
-data_dir = '../clmt_data/'
 
 class NETCDFDataset(data.Dataset):
 
@@ -39,7 +38,7 @@ class NETCDFDataset(data.Dataset):
 		#will be initialized later
 		self.normalized_train = None
 		self.normalized_dev = None
-
+		self.data_dir = data_dir
 
 	def __len__(self):
 		"""
@@ -110,22 +109,30 @@ class NETCDFDataset(data.Dataset):
 			file_dir = data_dir + clmt_dir
 			#create tensor for one climate variable
 			tensors_per_clmt_var = []
+			
+			#START-- If data is in the have a folder
 			#sort files in ascending order (based on the date)
-			filenames = os.listdir(file_dir)
-			filenames = sorted(filenames)
-			count_files += len(filenames)
-			for j, filename in enumerate(filenames):
-			        raw_clmt_data = self.export_netcdf(file_dir + filename,key)
-			        raw_tsr= torch.tensor(raw_clmt_data, dtype=torch.float32)
-			        tensors_per_clmt_var.append(raw_tsr)
+			#filenames = os.listdir(file_dir)
+			#filenames = sorted(filenames)
+			#count_files += len(filenames)
+			#for j, filename in enumerate(filenames):
+			#        raw_clmt_data = self.export_netcdf(file_dir + filename,key)
+			#        raw_tsr= torch.tensor(raw_clmt_data, dtype=torch.float32)
+			#        tensors_per_clmt_var.append(raw_tsr)
+			#END----
 
+			raw_clmt_data = self.export_netcdf(file_dir, key)
+			raw_tsr = torch.tensor(raw_clmt_data, dtype=torch.float32)
+			tensors_per_clmt_var.append(raw_tsr)
+
+			
 			#concatenate tensors along the size dimension
 			concat_tsr = torch.cat(tensors_per_clmt_var, dim=0)
 			all_tensors.append(concat_tsr)
 
-			print("Finished parsing {} files for variable \"{}\" ".format(len(filenames),key))
+			#print("Finished parsing {} files for variable \"{}\" ".format(len(filenames),key))
 		res_tsr = torch.stack(all_tensors, dim=3)
-		print("Finished parsing {} files total".format(count_files))
+		#print("Finished parsing {} files total".format(count_files))
 		tensor_len = res_tsr.shape[0]
 
 		#if we decided not to use all the data;add window size (5 days) that are used for context
