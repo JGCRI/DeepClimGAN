@@ -11,7 +11,7 @@ from Constants import clmt_vars
 from tqdm import tqdm
 from torch.autograd import Variable
 from DataSampler import DataSampler
-
+import chocolate as choco
 
 #import logger
 from sacred import Experiment
@@ -23,10 +23,24 @@ ex = Experiment('Test experiment')
 
 
 #MongoDB
-#DATABSE_URL = '172.18.65.215'
-DATABASE_URL = '172.20.242.12:2701'
+DATABASE_URL = '172.20.242.12:27017'
 DATABASE_NAME = 'climate_gan'
 ex.observers.append(MongoObserver.create(url=DATABASE_URL, db_name=DATABASE_NAME))
+
+#establish conenction to a SQLite database for optimization
+#conn = choco.SQLiteConnection("sqlite://my_db.db")
+
+#Construct the optimizer
+#sampler = choco.Bayes(conn, space)
+
+#Sample the next point
+#token, params = sampler.next()
+
+#Calculate the loss for the sampled point (minimzed)
+#loss = objective_function(**params)
+
+#Add the loss to the database
+#sampler.update(token, loss)
 
 
 
@@ -35,31 +49,42 @@ ex.observers.append(MongoObserver.create(url=DATABASE_URL, db_name=DATABASE_NAME
 @ex.config
 def my_config():
 	context_length = 5
-	lon, lat, t, channels = 128, 256, 30, len(clmt_vars	
+	lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
 	z_shape = 100
 	n_days = 32
 	apply_norm = True
-	batch_size = sys.argv[6]
-	lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
-	l1_lambda = 10
 	
 	#Percent of data to use, default = use all
 	data_pct = 1
 	#Percent of data to use for training
 	train_pct = 0.7
 	data_dir = sys.argv[3]
+	
+	#hyperparamteres TODO:
+	label_smoothing = False
+	add_noise_to_real = False
+	experience_replay = False
+	batch_size = 16
+	batch_size = sys.argv[6]
+	lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
+	l1_lambda = 10
 	num_epoch = int(sys.argv[2])
-
 
 
 class Trainer:
 	@ex.capture
 	def __init__(self):
-		self.lon. self.lat, self.context_length, self.channels, self.batch_size = self.set_parameters()
+		self.lon. self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_default_parameters()
+		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size = self.set_hyperparameters()
+		
 		
 	@ex.capture
-	def set_parameters(self, lon, lat, context_length, channels, batch_size):
-		return lon, lat, context_length, channels, batch_size
+	def set_parameters(self, lon, lat, context_length, channels, z_shape, n_days, apply_norm):
+		return lon, lat, context_length, channels, z_shape, n_days, apply_norm
+	
+	@ex.capture
+	def set_hyperparameters(self, label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch):
+		return label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch
 
 
 	@ex.capture
@@ -76,17 +101,20 @@ class Trainer:
 
 		self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
 		#build models
-		netD = Discriminator()
+		netD = Discriminator(self.label_smoothing, self.add_noise_to_real)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
 		netD.apply(weights_init)
 		netG.apply(weights_init)
 		
 
 		
+
 		#create optimizers
 		loss_func = torch.nn.CrossEntropyLoss()
-		d_optim = torch.optim.Adam(netD.parameters(), lr, [0.5, 0.999])
-		g_optim = torch.optim.Adam(netG.parameters(), lr, [0.5, 0.999])
+		if self.label_smoothing:
+			loss_func = torch.nn.KLDivLoss()
+		d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.5, 0.999])
+		g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.5, 0.999])
 				
 		
 
@@ -101,26 +129,23 @@ class Trainer:
 		print("Started parsing data...")
 		ds = NETCDFDataset(data_dir, data_pct,train_pct)
 		
-		if apply_norm:
+		if self.apply_norm:
 			normalizer = Normalizer()
 			#normalize training set
 			ds.normalized_train = normalizer.normalize(ds, 'train')
 		
 		
 		#Specify that we are loading training set
-		sampler = DataSampler(ds, batch_size, context_length, n_days)
-		b_sampler = data.BatchSampler(sampler, batch_size=batch_size, drop_last=True)
+		sampler = DataSampler(ds, self.batch_size, self.context_length, self.n_days)
+		b_sampler = data.BatchSampler(sampler, batch_size=self.batch_size, drop_last=True)
 		dl = data.DataLoader(ds, batch_sampler=b_sampler, num_workers=0)
 		dl_iter = iter(dl)
 	
 
-		#Lists to keep track of gradients
-		G_grads, D_grads = [], []
 		
 		#Training loop
 		n_updates = 1
-		for current_epoch in range(1, num_epoch + 1):
-			#n_updates = 1
+		for current_epoch in range(1, self.num_epoch + 1):
 			while True:
 				#sample batch
 				try:
@@ -136,28 +161,38 @@ class Trainer:
 				#unwrap the batch			
 				current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
 				
-				#smoothing labels
-				real_labels = to_variable(torch.LongTensor(np.ones(batch_size, dtype=int)), requires_grad = False)
-				fake_labels = to_variable(torch.LongTensor(np.zeros(batch_size, dtype = int)), requires_grad = False)
+				if self.label_smoothing:
+					ts = np.full((self.batch_size), 0.9)
+					real_labels = to_variable(torch.FloatTensor(ts), requires_grad = False))
+				else:
+					real_labels = to_variable(torch.LongTensor(np.ones(self.batch_size, dtype=int)), requires_grad = False)
+									
+				fake_labels = to_variable(torch.LongTensor(np.zeros(self.batch_size, dtype = int)), requires_grad = False)
 				
+
+
 				#ship tensors to devices
 				current_month = current_month.to(device)
 				avg_context = avg_context.to(device)
 				high_res_context = high_res_context.to(device)
 				
 				#sample noise
-				z = ds.get_noise(z_shape, batch_size)
+				z = ds.get_noise(self.z_shape, self.batch_size)
 				
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 				if n_updates % 2 == 1:
 					#save gradients for D
-					d_grad = check_grads(netD, "Discriminator")
+					d_grad = save_grads(netD, "Discriminator")
 					self._run.log_scalar('D_grads', d_grad, n_updates)
 					netD.zero_grad()
 					
 					#concatenate context with the input to feed D
 					input = ds.build_input_for_D(current_month, avg_context, high_res_context)
-		
+					if self.add_noise_to_real:
+						add_noise = GaussianNoise(device)
+						input = add_noise(input)
+
+
 					#1A. Train D on real
 					outputs = netD(input)
 					bsz, ch, h, w, t = outputs.shape
@@ -191,7 +226,7 @@ class Trainer:
 				
 					#2. Train Generator on D's response: maximize log(D(G(z))
 					#report grads
-					g_grad = check_grads(netG, "Generator")
+					g_grad = save_grads(netG, "Generator")
 					self._run.log_scalar('G_grads' g_grad, n_updates)
 					netG.zero_grad()
 					
@@ -211,9 +246,9 @@ class Trainer:
 					
 				n_updates += 1	
 	
-		losses = D_losses, G_losses
-		grads = D_grads, G_grads
-		save_results(sys, losses, grads)
+		#losses = D_losses, G_losses
+		#grads = D_grads, G_grads
+		#save_results(sys, losses, grads)
 	
 
 
@@ -224,7 +259,7 @@ def main(_run):
 
 
 if __name__ == "__main__":
-	num_experiments = 5
+	num_experiments = 1
 	
 	for i in range(num_experiments):
 		ex.run()
