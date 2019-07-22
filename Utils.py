@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 
 
-def init_weights(m):
+def weights_init(m):
 	"""
 	Custom weights initializaton called on G and D
 	All weights are iitializaed from a zero-centerd Normal Distribution
@@ -22,9 +22,9 @@ def init_weights(m):
 		m.weight.data.normal_(1.0, 0.02)
 		m.bias.data.fill_(0)
 
-def to_variable(x, requires_grad=True):
+def to_variable(x, device,requires_grad=True):
 	x = x.to(device)
-	return Vriable(x, requires_grad)
+	return Variable(x, requires_grad)
 
 def save_grads(model, model_name):
 	'''
@@ -50,11 +50,12 @@ def save_grads(model, model_name):
 #save losses and grads
 def save_results(sys, losses, grads):
 
-	exp_id = str(sys.argv[1])
-	to_save_fd = sys.argv[4]
-	exp_id_dir = "{}exp{}/".format(to_save_fd, exp_id)
-
-	D_losses, G_losses = losses
+	#exp_id = str(sys.argv[1])
+	#to_save_fd = sys.argv[4]
+	#exp_id_dir = "{}exp{}/".format(to_save_fd, exp_id)
+	exp_id_dir = sys.argv[4]
+	
+	D_losses, D_real_losses, D_fake_losses, G_losses = losses
 	D_grads, G_grads = grads
 
 		
@@ -65,6 +66,15 @@ def save_results(sys, losses, grads):
 
 	with open(exp_id_dir + 'd_losses.csv', 'w') as file:
 		for l in D_losses:
+			file.write(str(l))
+			file.write('\n')
+	with open(exp_id_dir + 'd_real_losses.csv', 'w') as file:
+		for l in D_real_losses:
+			file.write(str(l))
+			file.write('\n')
+	
+	with open(exp_id_dir + 'd_fake_losses.csv', 'w') as file:
+		for l in D_fake_losses:
 			file.write(str(l))
 			file.write('\n')
 
@@ -84,7 +94,7 @@ class GaussianNoise(nn.Module):
 		super().__init__()
 		self.sigma = sigma
 		self.is_relative_detach = is_relative_detach
-		self.noise = torch.tensor(0).to(device))
+		self.noise = torch.tensor(0).to(device)
 		self.is_training = is_training
 
 
