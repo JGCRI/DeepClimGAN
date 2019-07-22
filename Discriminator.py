@@ -29,7 +29,11 @@ class Discriminator(nn.Module):
 
 	def forward(self, x):
 		out = self.model(x)
+		print(out.shape)
 		#if smoothing, apply sigmoid for KLDivLoss
 		if self.label_smoothing:
+			#TODO:
+			ch, h, w, t = out.shape
+			out = out.view(-1, ch * h * w *t)
 			out = torch.sigmoid(out)
 		return out

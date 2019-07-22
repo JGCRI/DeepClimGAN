@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.autograd import Variable
 from DataSampler import DataSampler
 #import chocolate as choco
-
+from Utils import GaussianNoise
 #import logger
 from sacred import Experiment
 from sacred.observers import MongoObserver
@@ -26,14 +26,14 @@ n_days = 32
 apply_norm = True
 
 #Percent of data to use, default = use all
-data_pct = 1
+data_pct = 0.2
 #Percent of data to use for training
 train_pct = 0.7
 data_dir = sys.argv[3]
 
 #hyperparamteres TODO:
 label_smoothing = False
-add_noise_to_real = False
+add_noise_to_real = True
 experience_replay = False
 batch_size = int(sys.argv[5])
 lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
@@ -47,22 +47,24 @@ class Trainer:
 		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size = label_smoothing, add_noise_to_real, experience_replay, batch_size
 		self.lr = lr
 		self.num_epoch = num_epoch
-		#self.device = torch.device("cpu")
-		self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+		device = self.device = torch.device("cpu")
+		#self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+	
+
+
 	def run(self):
 		"""
 		Main routine
 		"""
 
-		device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
-		#device = torch.device("cpu")
+		#device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
+		device = torch.device("cpu")
 		#build models
 		netD = Discriminator(self.label_smoothing)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
 		netD.apply(ut.weights_init)
 		netG.apply(ut.weights_init)
 		
-
 		
 
 		#create optimizers
@@ -73,12 +75,12 @@ class Trainer:
 		g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.5, 0.999])
 				
 		
-
+		GPU = False
 		#use all possible GPU cores available
-		if torch.cuda.device_count() > 1:
-    			print("Using ", torch.cuda.device_count(), "GPUs!")
-    			netD = nn.DataParallel(netD)
-    			netG = nn.DataParallel(netG)
+		#if GPU and torch.cuda.device_count() > 1:
+    		#	print("Using ", torch.cuda.device_count(), "GPUs!")
+    		#	netD = nn.DataParallel(netD)
+    		#	netG = nn.DataParallel(netG)
 		netD.to(device)
 		netG.to(device)
 
@@ -121,7 +123,7 @@ class Trainer:
 				
 				if self.label_smoothing:
 					ts = np.full((self.batch_size), 0.9)
-					real_labels = ut.to_variable(torch.FloatTensor(ts),device, requires_grad = False)
+					real_labels = ut.to_variable(torch.FloatTensor(ts), device, requires_grad = False)
 				else:
 					real_labels = ut.to_variable(torch.LongTensor(np.ones(self.batch_size, dtype=int)), device,requires_grad = False)
 									
@@ -154,7 +156,9 @@ class Trainer:
 					#1A. Train D on real
 					outputs = netD(input)
 					bsz, ch, h, w, t = outputs.shape
+					print(outputs.shape)
 					outputs = outputs.view(bsz, h * w * t)
+					print(outputs.shape, real_labels.shape)
 					d_real_loss = loss_func(outputs, real_labels)
 					d_real_loss.backward()	
 					#report d_real_loss
@@ -210,9 +214,9 @@ class Trainer:
 					
 				n_updates += 1	
 	
-		losses = D_losses, D_real_losses, D_fake_losses, G_losses
-		grads = D_grads, G_grads
-		ut.save_results(sys, losses, grads)
+		#losses = D_losses, D_real_losses, D_fake_losses, G_losses
+		#grads = D_grads, G_grads
+		#ut.save_results(sys, losses, grads)
 	
 
 

@@ -4,7 +4,7 @@ import csv
 import os
 import numpy as np
 import torch.nn as nn
-
+import torch
 
 def weights_init(m):
 	"""
@@ -90,18 +90,16 @@ def save_results(sys, losses, grads):
 	
 
 class GaussianNoise(nn.Module):
-	def __init__(self, device, sigma=0.1, is_relative_detach=True, is_training=True):
+	def __init__(self, device, stddev=0.2, is_relative_detach=True, is_training=True):
 		super().__init__()
-		self.sigma = sigma
+		self.stddev= stddev
 		self.is_relative_detach = is_relative_detach
-		self.noise = torch.tensor(0).to(device)
 		self.is_training = is_training
-
+		self.device = device
 
 	def forward(self, x):
-		if is_training and self.sigma != 0:
-			scale = self.sigma * x.detach() if self.is_relative_detach else self.sigma * x
-			noise = self.noise.repeat(*x.size()).normal_() * scale
+		if self.is_training and self.stddev != 0:
+			noise = Variable(torch.randn(x.size()).to(self.device) * self.stddev)
 			x = x + noise
 		return x
 			

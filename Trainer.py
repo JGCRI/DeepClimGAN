@@ -18,7 +18,7 @@ from DataSampler import DataSampler
 from sacred import Experiment
 from sacred.observers import MongoObserver
 import Utils as ut
-
+from Utils import GaussianNoise
 
 ex = Experiment('Test experiment')
 
@@ -77,7 +77,7 @@ class Trainer:
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
 		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct = self.set_hyperparameters()
-		
+		self.exp_id, self.exp_name, self._run = self.get_exp_info()		
 		
 	@ex.capture
 	def set_parameters(self, lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir):
@@ -92,7 +92,7 @@ class Trainer:
 	def get_exp_info(self, _run):
 		exp_id = _run._id
 		exp_name = _run.experiment_info["name"]
-		return exp_id, exp_name
+		return exp_id, exp_name, _run
 
 	@ex.capture
 	def run(self):
@@ -183,15 +183,15 @@ class Trainer:
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 				if n_updates % 2 == 1:
 					#save gradients for D
-					d_grad = save_grads(netD, "Discriminator")
+					d_grad = ut.save_grads(netD, "Discriminator")
 					self._run.log_scalar('D_grads', d_grad, n_updates)
 					netD.zero_grad()
 					
 					#concatenate context with the input to feed D
 					input = ds.build_input_for_D(current_month, avg_context, high_res_context)
 					if self.add_noise_to_real:
-						add_noise = GaussianNoise(device)
-						input = add_noise(input)
+						noise = GaussianNoise(device)
+						input = noise(input)
 
 
 					#1A. Train D on real
@@ -209,7 +209,7 @@ class Trainer:
 					fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 					
 					#feed fake input augmented with the context to D
-					outputs = netD(fake_input_with_ctxt.detach()).view(batch_size, h * w * t)
+					outputs = netD(fake_input_with_ctxt.detach()).view(self.batch_size, h * w * t)
 					d_fake_loss = loss_func(outputs, fake_labels)
 					d_fake_loss.backward()
 					#report d_fake_loss
@@ -227,7 +227,7 @@ class Trainer:
 				
 					#2. Train Generator on D's response: maximize log(D(G(z))
 					#report grads
-					g_grad = save_grads(netG, "Generator")
+					g_grad = ut.save_grads(netG, "Generator")
 					self._run.log_scalar('G_grads', g_grad, n_updates)
 					netG.zero_grad()
 					
