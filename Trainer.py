@@ -20,7 +20,7 @@ from sacred.observers import MongoObserver
 import Utils as ut
 from Utils import GaussianNoise
 
-ex = Experiment('Test experiment')
+ex = Experiment('500 updates, add_noise_to_real = True')
 
 
 #MongoDB
@@ -45,8 +45,6 @@ ex.observers.append(MongoObserver.create(url=DATABASE_URL, db_name=DATABASE_NAME
 #sampler.update(token, loss)
 
 
-
-
 #sacred configs
 @ex.config
 def my_config():
@@ -65,27 +63,31 @@ def my_config():
 	#hyperparamteres TODO:
 	label_smoothing = False
 	add_noise_to_real = False
-	experience_replay = False
+	experience_replay = True
+	#replay_buffer_size = sys.argv[6]
 	batch_size = int(sys.argv[5])
 	lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
 	l1_lambda = 10
 	num_epoch = int(sys.argv[2])
 
-
 class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct = self.set_hyperparameters()
-		self.exp_id, self.exp_name, self._run = self.get_exp_info()		
+		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, \ 
+		self.train_pct, self.replay_buffer_size = self.set_hyperparameters()
+		self.exp_id, self.exp_name, self._run = self.get_exp_info()
+		
+		#buffer for expereince replay		
+		self.replay_buffer = []
 		
 	@ex.capture
 	def set_parameters(self, lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir):
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct):
-		return label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct
+	def set_hyperparameters(self, label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size):
+		return label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size
 
 
 	@ex.capture
@@ -101,6 +103,7 @@ class Trainer:
 		"""
 
 		device = self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
+		#device = self.device = torch.device("cpu")
 		#build models
 		netD = Discriminator(self.label_smoothing)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
@@ -145,8 +148,12 @@ class Trainer:
 
 		
 		#Training loop
-		n_updates = 1
 		for current_epoch in range(1, self.num_epoch + 1):
+			n_updates = 1
+		
+			#clean replay buffer after each epoch
+			self.replay_buffer = []
+			
 			while True:
 				#sample batch
 				try:
@@ -164,13 +171,11 @@ class Trainer:
 				
 				if self.label_smoothing:
 					ts = np.full((self.batch_size), 0.9)
-					real_labels = ut.to_variable(torch.FloatTensor(ts),device, requires_grad = False)
+					real_labels = ut.to_variable(torch.FloatTensor(ts), device, requires_grad = False)
 				else:
-					real_labels = ut.to_variable(torch.LongTensor(np.ones(self.batch_size, dtype=int)),device, requires_grad = False)
+					real_labels = ut.to_variable(torch.LongTensor(np.ones(self.batch_size, dtype=int)), device, requires_grad = False)
 									
 				fake_labels = ut.to_variable(torch.LongTensor(np.zeros(self.batch_size, dtype = int)), device,requires_grad = False)
-				
-
 
 				#ship tensors to devices
 				current_month = current_month.to(device)
@@ -207,9 +212,22 @@ class Trainer:
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
 					fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 					fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
-					
+											
 					#feed fake input augmented with the context to D
-					outputs = netD(fake_input_with_ctxt.detach()).view(self.batch_size, h * w * t)
+					if self.experience_replay and n_updates > 1::
+						perm = torch.randperm(self.replay_buffer.size(0))
+						half = self.batch_size / 2
+						buffer_idx = perm[:half]
+						samples_from_buffer = self.replay_buffer[idx]
+						perm = torch.randperm(fake_input_with_ctxt.size(0))
+						fake_idx = perm[:half]
+						samples_from_G = fake_inputs_with_ctxt[fake_idx]
+						D_input = torch.cat((samples_from_buffer, samples_from_G), dim = 0)
+					else:
+						D_input = fake_input_with_ctxt
+							
+					#outputs = netD(fake_input_with_ctxt.detach()).view(self.batch_size, h * w * t)
+					outputs = netD(D_input.detach()).view(self.batch_size, h * w * t)
 					d_fake_loss = loss_func(outputs, fake_labels)
 					d_fake_loss.backward()
 					#report d_fake_loss
@@ -222,6 +240,26 @@ class Trainer:
 					
 					#Update D
 					d_optim.step()
+					
+					#Update experience replay
+					if self.experience_replay:
+						#save random 1/2 of batch of generated data
+						perm = torch.randperm(fake_input_with_ctxt.size(0))
+						half = self.batch_size / 2
+						idx = perm[:half]
+						samples_to_buffer = fake_input_with_ctxt[idx]
+						
+						#initialize experience replay
+						if n_updates == 1:
+							self.replay_buffer = samples_to_buffer
+						else:
+							#replace  1/2 of batch size from the buffer with the newly \
+							#generated data
+							perm = torch.randperm(self.replay_buffer)
+							idx = perm[:half]
+							self.replay_buffer[idx] = samples_to_buffer
+
+				
 					print("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
 				else:
 				
