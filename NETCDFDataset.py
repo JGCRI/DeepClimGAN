@@ -11,7 +11,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 from torch.distributions.multivariate_normal import MultivariateNormal
-
+import re
 
 
 #default params
@@ -25,7 +25,7 @@ batch_size = 16
 
 class NETCDFDataset(data.Dataset):
 
-	def __init__(self, data_dir, data_pct, train_pct):
+	def __init__(self, data_dir, data_pct, train_pct, scenario):
 		"""
 		Init the dataset
 
@@ -33,12 +33,13 @@ class NETCDFDataset(data.Dataset):
 		param: train_pct (float) Percent of data to use for training
 		"""
 
-		self.data, self.len  = self.build_dataset(data_dir, data_pct)
+		self.data, self.len  = self.build_dataset(data_dir, data_pct, scenario)
 		self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)
 		#will be initialized later
 		self.normalized_train = None
 		self.normalized_dev = None
 		self.data_dir = data_dir
+		self.scenario = scenario
 
 	def __len__(self):
 		"""
@@ -89,7 +90,7 @@ class NETCDFDataset(data.Dataset):
 
 
 
-	def build_dataset(self, data_dir, data_pct):
+	def build_dataset(self, data_dir, data_pct, scenario, n_files):
 		"""
 		Builds dataset out of all climate variables of shape HxWxNxC, where:
 		N - #of datapoints (days)
@@ -105,25 +106,26 @@ class NETCDFDataset(data.Dataset):
 		all_tensors = []
 		count_files = 0
 		for i, (key, val) in enumerate(clmt_vars.items()):
-			clmt_dir = val[0]
-			file_dir = data_dir + clmt_dir
+			var_name = val[0]
+			#file_dir = data_dir + var_name + scenario
+			
 			#create tensor for one climate variable
 			tensors_per_clmt_var = []
 			
-			#START-- If data is in the have a folder
 			#sort files in ascending order (based on the date)
-			#filenames = os.listdir(file_dir)
-			#filenames = sorted(filenames)
-			#count_files += len(filenames)
-			#for j, filename in enumerate(filenames):
-			#        raw_clmt_data = self.export_netcdf(file_dir + filename,key)
-			#        raw_tsr= torch.tensor(raw_clmt_data, dtype=torch.float32)
-			#        tensors_per_clmt_var.append(raw_tsr)
-			#END----
+			filenames = os.listdir(file_dir)
+			filenames = sorted(filenames)
+			#search all that suit to our scenario
+			my_files = re.findall(var_name + scenario, filenames)[:n_files]
+			count_files += len(filenames)
+			for j, filename in enumerate(filenames):
+				raw_clmt_data = self.export_netcdf(file_dir + filename, key)
+				raw_tsr= torch.tensor(raw_clmt_data, dtype=torch.float32)
+				tensors_per_clmt_var.append(raw_tsr)
 
-			raw_clmt_data = self.export_netcdf(file_dir, key)
-			raw_tsr = torch.tensor(raw_clmt_data, dtype=torch.float32)
-			tensors_per_clmt_var.append(raw_tsr)
+			#raw_clmt_data = self.export_netcdf(file_dir, key)
+			#raw_tsr = torch.tensor(raw_clmt_data, dtype=torch.float32)
+			#tensors_per_clmt_var.append(raw_tsr)
 
 			
 			#concatenate tensors along the size dimension

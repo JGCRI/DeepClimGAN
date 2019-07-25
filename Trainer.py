@@ -64,18 +64,20 @@ def my_config():
 	label_smoothing = False
 	add_noise_to_real = False
 	experience_replay = True
-	#replay_buffer_size = sys.argv[6]
+	#replay_buffer_size = sys.argv[7]
 	batch_size = int(sys.argv[5])
-	lr = 0.0002 #NOTE: this lr is coming from original paper about DCGAN
+	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
 	num_epoch = int(sys.argv[2])
+	scenario = sys.argv[6]		
+	number_of_files = int(sys.argv[7])
 
 class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
 		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, \ 
-		self.train_pct, self.replay_buffer_size = self.set_hyperparameters()
+		self.train_pct, self.replay_buffer_size, self.scenario, self.number_of_files = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		
 		#buffer for expereince replay		
@@ -86,8 +88,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size):
-		return label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size
+	def set_hyperparameters(self, label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files):
+		return label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files
 
 
 	@ex.capture
@@ -102,8 +104,8 @@ class Trainer:
 		Main routine
 		"""
 
-		device = self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
-		#device = self.device = torch.device("cpu")
+		#device = self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
+		device = self.device = torch.device("cpu")
 		#build models
 		netD = Discriminator(self.label_smoothing)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
@@ -123,7 +125,7 @@ class Trainer:
 		
 
 		#use all possible GPU cores available
-		if torch.cuda.device_count() > 1:
+		if False and torch.cuda.device_count() > 1:
     			print("Using ", torch.cuda.device_count(), "GPUs!")
     			netD = nn.DataParallel(netD)
     			netG = nn.DataParallel(netG)
@@ -131,7 +133,7 @@ class Trainer:
 		netG.to(device)
 
 		print("Started parsing data...")
-		ds = NETCDFDataset(self.data_dir, self.data_pct, self.train_pct)
+		ds = NETCDFDataset(self.data_dir, self.data_pct, self.train_pct, self.scenario, self.number_of_files)
 		
 		if self.apply_norm:
 			normalizer = Normalizer()
@@ -151,9 +153,6 @@ class Trainer:
 		for current_epoch in range(1, self.num_epoch + 1):
 			n_updates = 1
 		
-			#clean replay buffer after each epoch
-			self.replay_buffer = []
-			
 			while True:
 				#sample batch
 				try:
@@ -218,7 +217,7 @@ class Trainer:
 						perm = torch.randperm(self.replay_buffer.size(0))
 						half = self.batch_size / 2
 						buffer_idx = perm[:half]
-						samples_from_buffer = self.replay_buffer[idx]
+						samples_from_buffer = self.replay_buffer[buffer_idx]
 						perm = torch.randperm(fake_input_with_ctxt.size(0))
 						fake_idx = perm[:half]
 						samples_from_G = fake_inputs_with_ctxt[fake_idx]
@@ -249,8 +248,8 @@ class Trainer:
 						idx = perm[:half]
 						samples_to_buffer = fake_input_with_ctxt[idx]
 						
-						#initialize experience replay
 						if n_updates == 1:
+							#initialize experience replay
 							self.replay_buffer = samples_to_buffer
 						else:
 							#replace  1/2 of batch size from the buffer with the newly \
@@ -258,7 +257,6 @@ class Trainer:
 							perm = torch.randperm(self.replay_buffer)
 							idx = perm[:half]
 							self.replay_buffer[idx] = samples_to_buffer
-
 				
 					print("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
 				else:
