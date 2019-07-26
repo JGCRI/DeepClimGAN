@@ -62,7 +62,7 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise_to_real = False
+	add_noise = False
 	experience_replay = True
 	#replay_buffer_size = sys.argv[7]
 	batch_size = int(sys.argv[5])
@@ -76,10 +76,9 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise_to_real, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, \ 
-		self.train_pct, self.replay_buffer_size, self.scenario, self.number_of_files = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct, self.replay_buffer_size, self.scenario, self.number_of_files = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
-		
+		self.noise = None
 		#buffer for expereince replay		
 		self.replay_buffer = []
 		
@@ -88,8 +87,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files):
-		return label_smoothing, add_noise_to_real, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files
 
 
 	@ex.capture
@@ -110,10 +109,7 @@ class Trainer:
 		netD = Discriminator(self.label_smoothing)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
 		netD.apply(ut.weights_init)
-		netG.apply(ut.weights_init)
-		
-
-		
+		netG.apply(ut.weights_init)		
 
 		#create optimizers
 		loss_func = torch.nn.CrossEntropyLoss()
@@ -192,16 +188,17 @@ class Trainer:
 					netD.zero_grad()
 					
 					#concatenate context with the input to feed D
-					input = ds.build_input_for_D(current_month, avg_context, high_res_context)
-					if self.add_noise_to_real:
-						noise = GaussianNoise(device)
-						input = noise(input)
-
-
+					if self.add_noise:
+						self.noise = GaussianNoise(device)
+						current_month = self.noise(current_month)
+					input = ds.build_input_for_D(current_month, avg_context, high_res_context)				
+					
 					#1A. Train D on real
 					outputs = netD(input)
 					bsz, ch, h, w, t = outputs.shape
 					outputs = outputs.view(bsz, h * w * t)
+					if self.label_smoothing:
+						outputs = torch.nn.Sigmoid(outputs)
 					d_real_loss = loss_func(outputs, real_labels)
 					d_real_loss.backward()	
 					#report d_real_loss
@@ -210,10 +207,13 @@ class Trainer:
 					#1B. Train D on fake
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
 					fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
+					if self.add_noise:
+						fake_inputs = self.noise(fake_inputs)
+					
 					fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 											
 					#feed fake input augmented with the context to D
-					if self.experience_replay and n_updates > 1::
+					if self.experience_replay and n_updates > 1:
 						perm = torch.randperm(self.replay_buffer.size(0))
 						half = self.batch_size / 2
 						buffer_idx = perm[:half]

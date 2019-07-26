@@ -1,11 +1,11 @@
 
-rhs_day_dir = 'rhs_day_MIROC5'
-rhs_min_dir = 'rhsmin_day_MIROC5'
-rhs_max_dir = 'rhsmax_day_MIROC5'
-tas_day_dir = 'tas_day_MIROC5'
-tas_max_dir = 'tasmax_day_MIROC5'
-tas_min_dir = 'tasmin_day_MIROC5'
-pr_day_dir = 'pr_day_MIROC5'
+rhs_day_dir = 'rhs_day_MIROC5_'
+rhs_min_dir = 'rhsmin_day_MIROC5_'
+rhs_max_dir = 'rhsmax_day_MIROC5_'
+tas_day_dir = 'tas_day_MIROC5_'
+tas_max_dir = 'tasmax_day_MIROC5_'
+tas_min_dir = 'tasmin_day_MIROC5_'
+pr_day_dir = 'pr_day_MIROC5_'
 
 
 clmt_vars = {

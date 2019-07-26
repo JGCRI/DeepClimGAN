@@ -25,17 +25,7 @@ class Discriminator(nn.Module):
 			batchNorm5d(512, 1e-3),
 			lrelu(0.2),
 			conv3d(512,2))
-		#self.sig = nn.Sequential(nn.Linear(2,1), nn.Sigmoid())
 
 	def forward(self, x):
 		out = self.model(x)
-		#if smoothing, apply sigmoid for KLDivLoss
-		#if self.label_smoothing:
-			#print(out.shape)	
-			#TODO:
-			#ch, h, w, t = out.shape
-			#out = out.view(-1, ch * h * w *t)
-			#out = self.sig(out)
-			#out = torch.sigmoid(out)
-			#print(out.shape)
 		return out
