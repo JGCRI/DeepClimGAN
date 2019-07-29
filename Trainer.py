@@ -14,13 +14,12 @@ from torch.autograd import Variable
 from DataSampler import DataSampler
 #import chocolate as choco
 
-#import logger
 from sacred import Experiment
 from sacred.observers import MongoObserver
 import Utils as ut
 from Utils import GaussianNoise
 
-ex = Experiment('500 updates, add_noise_to_real = True')
+ex = Experiment('Experience replay')
 
 
 #MongoDB
@@ -64,8 +63,8 @@ def my_config():
 	label_smoothing = False
 	add_noise = False
 	experience_replay = True
-	#replay_buffer_size = sys.argv[7]
 	batch_size = int(sys.argv[5])
+	replay_buffer_size = batch_size * 4
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
 	num_epoch = int(sys.argv[2])
@@ -76,7 +75,7 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct, self.replay_buffer_size, self.scenario, self.number_of_files = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct, self.replay_buffer_size,  self.scenario, self.number_of_files = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
 		#buffer for expereince replay		
@@ -221,7 +220,7 @@ class Trainer:
 						perm = torch.randperm(fake_input_with_ctxt.size(0))
 						fake_idx = perm[:half]
 						samples_from_G = fake_inputs_with_ctxt[fake_idx]
-						D_input = torch.cat((samples_from_buffer, samples_from_G), dim = 0)
+						D_input = torch.cat((samples_from_buffer, samples_from_G), dim=0)
 					else:
 						D_input = fake_input_with_ctxt
 							
@@ -252,11 +251,15 @@ class Trainer:
 							#initialize experience replay
 							self.replay_buffer = samples_to_buffer
 						else:
+							#first grow the buffer to the needed buffer size, and then start replacing data
 							#replace  1/2 of batch size from the buffer with the newly \
 							#generated data
-							perm = torch.randperm(self.replay_buffer)
-							idx = perm[:half]
-							self.replay_buffer[idx] = samples_to_buffer
+							if self.replay_buffer.shape[0] == self.replay_buffer_size:
+								perm = torch.randperm(self.replay_buffer)
+								idx = perm[:half]
+								self.replay_buffer[idx] = samples_to_buffer
+							else:
+								self.replay_buffer = torch.cat((self.replay_buffer, samples_to_buffer),dim=0) 
 				
 					print("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
 				else:
@@ -274,7 +277,7 @@ class Trainer:
 					bsz, c, h, w, t = outputs.shape
 					outputs = outputs.view(bsz, h * w * t)
 					g_loss = loss_func(outputs, real_labels)#compute loss for G
-					g_loss.backward()#only optimize G's parameters
+					g_loss.backward()
 					g_optim.step()
 					
 					print("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
@@ -282,11 +285,6 @@ class Trainer:
 					self._run.log_scalar('g_loss', g_loss.item(), n_updates)
 					
 				n_updates += 1	
-	
-		#losses = D_losses, G_losses
-		#grads = D_grads, G_grads
-		#save_results(sys, losses, grads)
-	
 
 
 @ex.main

@@ -21,11 +21,10 @@ n_days = 32
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
-batch_size = 16
 
 class NETCDFDataset(data.Dataset):
 
-	def __init__(self, data_dir, data_pct, train_pct, scenario):
+	def __init__(self, data_dir, data_pct, train_pct, scenario, n_files):
 		"""
 		Init the dataset
 
@@ -33,7 +32,7 @@ class NETCDFDataset(data.Dataset):
 		param: train_pct (float) Percent of data to use for training
 		"""
 
-		self.data, self.len  = self.build_dataset(data_dir, data_pct, scenario)
+		self.data, self.len  = self.build_dataset(data_dir, data_pct, scenario, n_files)
 		self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)
 		#will be initialized later
 		self.normalized_train = None
@@ -104,11 +103,10 @@ class NETCDFDataset(data.Dataset):
 
 		#all tensors is a list of tensor, where each tensor has data about one climate variable
 		all_tensors = []
-		count_files = 0
 		for i, (key, val) in enumerate(clmt_vars.items()):
 			var_name = val[0]
 			#file_dir = data_dir + var_name + scenario
-			
+			file_dir = data_dir
 			#create tensor for one climate variable
 			tensors_per_clmt_var = []
 			
@@ -116,11 +114,15 @@ class NETCDFDataset(data.Dataset):
 			filenames = os.listdir(file_dir)
 			filenames = sorted(filenames)
 			#search all that suit to our scenario
-			my_files = re.findall(var_name + scenario, filenames)[:n_files]
-			count_files += len(filenames)
+			my_files = []
+			for i in range(len(filenames)):
+				if var_name + scenario in filenames[i] and len(my_files) < n_files:
+					my_files.append(filenames[i])
+			filenames = my_files
+
 			for j, filename in enumerate(filenames):
 				raw_clmt_data = self.export_netcdf(file_dir + filename, key)
-				raw_tsr= torch.tensor(raw_clmt_data, dtype=torch.float32)
+				raw_tsr = torch.tensor(raw_clmt_data, dtype=torch.float32)
 				tensors_per_clmt_var.append(raw_tsr)
 
 			#raw_clmt_data = self.export_netcdf(file_dir, key)
@@ -134,7 +136,6 @@ class NETCDFDataset(data.Dataset):
 
 			#print("Finished parsing {} files for variable \"{}\" ".format(len(filenames),key))
 		res_tsr = torch.stack(all_tensors, dim=3)
-		#print("Finished parsing {} files total".format(count_files))
 		tensor_len = res_tsr.shape[0]
 
 		#if we decided not to use all the data;add window size (5 days) that are used for context
