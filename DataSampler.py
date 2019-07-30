@@ -11,11 +11,10 @@ class DataSampler(Sampler):
 	"""
 
 
-	def __init__(self,data_source, batch_size, context_window, n_days):
+	def __init__(self,batch_size, context_window, n_days):
 		"""
 		Initialize sampler
 		"""
-		self.train_data = data_source.normalized_train
 		self.batch_size = batch_size
 		idx_start = context_window
 		idx_end = self.train_data.shape[-1] - n_days - 1

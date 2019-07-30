@@ -1,7 +1,7 @@
 import numpy as np
 import os
 import sys
-from NETCDFDataset import NETCDFDataset
+from NETCDFDatasetDist import NETCDFDatasetDist
 from Discriminator import Discriminator
 from Generator import Generator
 from Normalizer import Normalizer
@@ -19,7 +19,7 @@ from sacred.observers import MongoObserver
 import Utils as ut
 from Utils import GaussianNoise
 
-ex = Experiment('Experience replay')
+ex = Experiment('Add noise to D')
 
 
 #MongoDB
@@ -124,8 +124,7 @@ class Trainer:
 		netD.to(device)
 		netG.to(device)
 		
-		logging.info("Started parsing data..")
-		ds = NETCDFDataset(self.data_dir, self.data_pct, self.train_pct, self.scenario, self.number_of_files)
+		ds = NETCDFDataset(self.data_dir,self.train_pct)
 		
 		if self.apply_norm:
 			normalizer = Normalizer()

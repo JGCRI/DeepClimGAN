@@ -1,4 +1,9 @@
 
+scenarios = ["rcp26", "rcp45", "rcp60", "rcp85", "historical"]
+realization = ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1"]
+
+
+
 rhs_day_dir = 'rhs_day_MIROC5_'
 rhs_min_dir = 'rhsmin_day_MIROC5_'
 rhs_max_dir = 'rhsmax_day_MIROC5_'
