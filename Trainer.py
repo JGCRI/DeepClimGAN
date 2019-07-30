@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.autograd import Variable
 from DataSampler import DataSampler
 #import chocolate as choco
-
+import logging
 from sacred import Experiment
 from sacred.observers import MongoObserver
 import Utils as ut
@@ -61,8 +61,8 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = False
-	experience_replay = True
+	add_noise = True
+	experience_replay = False
 	batch_size = int(sys.argv[5])
 	replay_buffer_size = batch_size * 4
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
@@ -102,8 +102,7 @@ class Trainer:
 		Main routine
 		"""
 
-		#device = self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
-		device = self.device = torch.device("cpu")
+		device = self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
 		#build models
 		netD = Discriminator(self.label_smoothing)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
@@ -117,17 +116,15 @@ class Trainer:
 		d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.5, 0.999])
 		g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.5, 0.999])
 				
-		
-
+	
 		#use all possible GPU cores available
-		if False and torch.cuda.device_count() > 1:
-    			print("Using ", torch.cuda.device_count(), "GPUs!")
-    			netD = nn.DataParallel(netD)
-    			netG = nn.DataParallel(netG)
+		if torch.cuda.device_count() > 1:
+			netD = nn.DataParallel(netD)
+			netG = nn.DataParallel(netG)
 		netD.to(device)
 		netG.to(device)
-
-		print("Started parsing data...")
+		
+		logging.info("Started parsing data..")
 		ds = NETCDFDataset(self.data_dir, self.data_pct, self.train_pct, self.scenario, self.number_of_files)
 		
 		if self.apply_norm:
@@ -155,7 +152,7 @@ class Trainer:
 				except StopIteration:
 					#end of epoch -> shuffle dataset and reinitialize iterator
 					sampler.permute()
-					print("shuffling batches...\n")
+					logging.info("Shuffling batches")
 					dl_iter = iter(dl)
 					#start new epoch
 					break
@@ -195,9 +192,10 @@ class Trainer:
 					#1A. Train D on real
 					outputs = netD(input)
 					bsz, ch, h, w, t = outputs.shape
-					outputs = outputs.view(bsz, h * w * t)
+					outputs = outputs.view(bsz, ch * h * w * t)
 					if self.label_smoothing:
 						outputs = torch.nn.Sigmoid(outputs)
+					
 					d_real_loss = loss_func(outputs, real_labels)
 					d_real_loss.backward()	
 					#report d_real_loss
@@ -214,18 +212,18 @@ class Trainer:
 					#feed fake input augmented with the context to D
 					if self.experience_replay and n_updates > 1:
 						perm = torch.randperm(self.replay_buffer.size(0))
-						half = self.batch_size / 2
+						half = self.batch_size // 2
 						buffer_idx = perm[:half]
 						samples_from_buffer = self.replay_buffer[buffer_idx]
 						perm = torch.randperm(fake_input_with_ctxt.size(0))
 						fake_idx = perm[:half]
-						samples_from_G = fake_inputs_with_ctxt[fake_idx]
+						samples_from_G = fake_input_with_ctxt[fake_idx]
 						D_input = torch.cat((samples_from_buffer, samples_from_G), dim=0)
 					else:
 						D_input = fake_input_with_ctxt
 							
-					#outputs = netD(fake_input_with_ctxt.detach()).view(self.batch_size, h * w * t)
-					outputs = netD(D_input.detach()).view(self.batch_size, h * w * t)
+					outputs = netD(D_input.detach()).view(self.batch_size, ch * h * w * t)
+					
 					d_fake_loss = loss_func(outputs, fake_labels)
 					d_fake_loss.backward()
 					#report d_fake_loss
@@ -243,7 +241,7 @@ class Trainer:
 					if self.experience_replay:
 						#save random 1/2 of batch of generated data
 						perm = torch.randperm(fake_input_with_ctxt.size(0))
-						half = self.batch_size / 2
+						half = self.batch_size // 2
 						idx = perm[:half]
 						samples_to_buffer = fake_input_with_ctxt[idx]
 						
@@ -255,13 +253,13 @@ class Trainer:
 							#replace  1/2 of batch size from the buffer with the newly \
 							#generated data
 							if self.replay_buffer.shape[0] == self.replay_buffer_size:
-								perm = torch.randperm(self.replay_buffer)
+								perm = torch.randperm(self.replay_buffer.size(0))
 								idx = perm[:half]
 								self.replay_buffer[idx] = samples_to_buffer
 							else:
 								self.replay_buffer = torch.cat((self.replay_buffer, samples_to_buffer),dim=0) 
 				
-					print("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
+					logging.info("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
 				else:
 				
 					#2. Train Generator on D's response: maximize log(D(G(z))
@@ -275,13 +273,12 @@ class Trainer:
 					d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
 					outputs = netD(d_input)
 					bsz, c, h, w, t = outputs.shape
-					outputs = outputs.view(bsz, h * w * t)
+					outputs = outputs.view(bsz, c * h * w * t)
 					g_loss = loss_func(outputs, real_labels)#compute loss for G
 					g_loss.backward()
 					g_optim.step()
 					
-					print("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
-				
+					logging.info("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
 					self._run.log_scalar('g_loss', g_loss.item(), n_updates)
 					
 				n_updates += 1	

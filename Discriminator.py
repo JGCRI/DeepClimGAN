@@ -12,7 +12,6 @@ n_channels = len(clmt_vars)
 class Discriminator(nn.Module):
 	def __init__(self, label_smoothing):
 		super(Discriminator, self).__init__()
-		self.label_smoothing = label_smoothing
 		self.model = nn.Sequential(
 			#model takes n_channels+2 as number of channels,
 			#since we are doing conditional GAN (2 channels is for average maps)

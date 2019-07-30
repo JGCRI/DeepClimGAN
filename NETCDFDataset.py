@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from torch.distributions.multivariate_normal import MultivariateNormal
 import re
-
+import logging
 
 #default params
 lat = 128
@@ -21,7 +21,7 @@ n_days = 32
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
-
+batch_size = 16
 class NETCDFDataset(data.Dataset):
 
 	def __init__(self, data_dir, data_pct, train_pct, scenario, n_files):
@@ -116,10 +116,10 @@ class NETCDFDataset(data.Dataset):
 			#search all that suit to our scenario
 			my_files = []
 			for i in range(len(filenames)):
-				if var_name + scenario in filenames[i] and len(my_files) < n_files:
+				pattern = var_name + scenario
+				if pattern in filenames[i] and len(my_files) < n_files:
 					my_files.append(filenames[i])
 			filenames = my_files
-
 			for j, filename in enumerate(filenames):
 				raw_clmt_data = self.export_netcdf(file_dir + filename, key)
 				raw_tsr = torch.tensor(raw_clmt_data, dtype=torch.float32)
@@ -134,7 +134,6 @@ class NETCDFDataset(data.Dataset):
 			concat_tsr = torch.cat(tensors_per_clmt_var, dim=0)
 			all_tensors.append(concat_tsr)
 
-			#print("Finished parsing {} files for variable \"{}\" ".format(len(filenames),key))
 		res_tsr = torch.stack(all_tensors, dim=3)
 		tensor_len = res_tsr.shape[0]
 
@@ -144,7 +143,7 @@ class NETCDFDataset(data.Dataset):
 
 
 		res_tsr = res_tsr.permute(3, 1, 2, 0)#C x H x W x N
-		print("The size of result tensor is {}".format(res_tsr.shape))
+		logging.info("The size of result tensor is {}".format(res_tsr.shape))
 		return res_tsr, data_len
 	
 
