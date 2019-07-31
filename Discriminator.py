@@ -24,7 +24,12 @@ class Discriminator(nn.Module):
 			batchNorm5d(512, 1e-3),
 			lrelu(0.2),
 			conv3d(512,2))
-
+		
+		#todo: double check
+		self.fc1 = torch.nn.Linear(4 * 8 * 2, 16)
+		self.fc2 = torch.nn.Linear(16, 1)
+		
 	def forward(self, x):
 		out = self.model(x)
-		return out
+		output = self.fc2(self.fc1(out))
+		return output

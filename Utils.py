@@ -89,6 +89,25 @@ def save_results(sys, losses, grads):
 			file.write('\n')
 	
 
+def sort_files_by_size(directory):
+	# Get all files.
+	list = os.listdir(directory)
+
+	# Loop and add files to list.
+	pairs = []
+	for file in list:
+    		# Use join to get full file path.
+    		location = os.path.join(directory, file)
+
+    		# Get size and add to list of tuples.
+    		size = os.path.getsize(location)
+    		pairs.append((size, file))
+
+	# Sort list of tuples by the first element, size.
+	pairs.sort(key=lambda s: s[0])
+	return pairs
+
+
 class GaussianNoise(nn.Module):
 	def __init__(self, device, stddev=0.2, is_relative_detach=True, is_training=True):
 		super().__init__()

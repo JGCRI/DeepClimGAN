@@ -8,29 +8,6 @@ class Normalizer:
         self.clmt_stats = {}
 
 
-    def get_mean_std_for_channel(self, data):
-        mean = torch.mean(data).item()
-        std = torch.std(data).item()
-        return mean, std
-
-    def get_min_max_for_channel(self, data):
-        min = torch.min(data).item()	
-        max = torch.max(data).item()
-        return min, max
-
-
-    def normalize_channel(self, data, clmt_var):
-        """
-        Normalizes  data across the dim
-        param: data (tensor) H x W x T
-        return normalized data
-        """
-        min = self.clmt_stats[clmt_var][0]
-        max = self.clmt_stats[clmt_var][1]
-        x_norm = (data - min) / max
-        return x_norm
-
-
     def log_normalize_channel(self, data):
         """
 	Log normalize the data (base e)
@@ -40,18 +17,6 @@ class Normalizer:
 	
         x = np.log(1 + data)
         return x
-
-
-    def denormalize(self, batch, clmt_var):
-        """
-        Denormalizes batch of data across the dim
-        param: batch (tensor) Batch of data
-        return denormalized data
-        """
-        min = self.clmt_stats[clmt_var][0]
-        max = self.clmt_stats[clmt_var][1]
-        x_denorm = batch * (max - min) + min
-        return x_denorm
 
 
     def standartize_channel(self, batch, clmt_var):
@@ -75,32 +40,20 @@ class Normalizer:
         return mean + batch * std
 
 
-    def normalize(self, ds, dataset_type):
+    def normalize(self, tsr):
         """
 	Normalizes the data
 	param: data (tensor)
 	param: dataset_type(str) type of a dataset
 	return normalized data
         """
-        if dataset_type not in ['train', 'dev']:
-                raise Exception('Correct dataset type is not provided. Use \'train\' or \'dev\' ')
-
-        up, lb = 0, 0
-        if dataset_type == 'train':
-                lb = ds.train_len
-        elif dataset_type == 'dev':
-                ub = ds.train_len
-                lb = ds.train_len + ds.dev_len
-
-        data = ds.data[:,:,:,up:lb]
 
         for i, (var, val) in enumerate(clmt_vars.items()):
                 norm_type = val[1]
                 if norm_type == 'log_norm':
-                        data[i] = self.log_normalize_channel(data[i])
+                        tsr[i] = self.log_normalize_channel(tsr[i])
                 elif norm_type == 'stand':
-                        mean ,std = self.get_mean_std_for_channel(data[i])
                         self.clmt_stats[var] = [mean, std]
-                        data[i] = self.standartize_channel(data[i], var)
+                        tsr[i] = self.standartize_channel(tsr[i], var)
         return data
 

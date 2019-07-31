@@ -124,16 +124,19 @@ class Trainer:
 		netD.to(device)
 		netG.to(device)
 		
-		ds = NETCDFDataset(self.data_dir,self.train_pct)
+
+		#load specific partition for a node
+		#partition = []
+		ds = NETCDFDataPartition(partition)
 		
-		if self.apply_norm:
-			normalizer = Normalizer()
-			#normalize training set
-			ds.normalized_train = normalizer.normalize(ds, 'train')
+		#if self.apply_norm:
+		#	normalizer = Normalizer()
+		#	#normalize training set
+		#	ds.normalized_train = normalizer.normalize(ds, 'train')
 		
 		
 		#Specify that we are loading training set
-		sampler = DataSampler(ds, self.batch_size, self.context_length, self.n_days)
+		sampler = DataSampler(self.batch_size, self.context_length, self.n_days)
 		b_sampler = data.BatchSampler(sampler, batch_size=self.batch_size, drop_last=True)
 		dl = data.DataLoader(ds, batch_sampler=b_sampler, num_workers=0)
 		dl_iter = iter(dl)
@@ -190,8 +193,8 @@ class Trainer:
 					
 					#1A. Train D on real
 					outputs = netD(input)
-					bsz, ch, h, w, t = outputs.shape
-					outputs = outputs.view(bsz, ch * h * w * t)
+					#bsz, ch, h, w, t = outputs.shape
+					#outputs = outputs.view(bsz, ch * h * w * t)
 					if self.label_smoothing:
 						outputs = torch.nn.Sigmoid(outputs)
 					
@@ -221,7 +224,8 @@ class Trainer:
 					else:
 						D_input = fake_input_with_ctxt
 							
-					outputs = netD(D_input.detach()).view(self.batch_size, ch * h * w * t)
+					#outputs = netD(D_input.detach()).view(self.batch_size, ch * h * w * t)
+					outputs = netD(D_input.detach())
 					
 					d_fake_loss = loss_func(outputs, fake_labels)
 					d_fake_loss.backward()
@@ -271,8 +275,8 @@ class Trainer:
 					g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
 					d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
 					outputs = netD(d_input)
-					bsz, c, h, w, t = outputs.shape
-					outputs = outputs.view(bsz, c * h * w * t)
+					#bsz, c, h, w, t = outputs.shape
+					#outputs = outputs.view(bsz, c * h * w * t)
 					g_loss = loss_func(outputs, real_labels)#compute loss for G
 					g_loss.backward()
 					g_optim.step()
