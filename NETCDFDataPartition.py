@@ -20,7 +20,7 @@ batch_size = 16
 
 class NETCDFDataPartition(data.Dataset):
 
-	def __init__(self, partition):
+	def __init__(self, data_dir):
 		"""
 		Init the dataset
 
@@ -29,7 +29,7 @@ class NETCDFDataPartition(data.Dataset):
 		"""
 
 		#self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)
-		self.data = self.load_tensors(partition)
+		self.data = self.load_tensors(data_dir)
 
 
 	def __len__(self):
@@ -40,7 +40,8 @@ class NETCDFDataPartition(data.Dataset):
 
 	def load_tensors(self, data_dir):
 
-		#torch.load()
+		data = torch.load(data_dir)
+		return data
 
 
 	def __getitem__(self, idx):

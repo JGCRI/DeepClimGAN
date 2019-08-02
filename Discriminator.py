@@ -26,10 +26,14 @@ class Discriminator(nn.Module):
 			conv3d(512,2))
 		
 		#todo: double check
-		self.fc1 = torch.nn.Linear(4 * 8 * 2, 16)
-		self.fc2 = torch.nn.Linear(16, 1)
-		
+		self.fc1 = torch.nn.Linear(2 * 8 * 16 * 2, 128)
+		self.fc2 = torch.nn.Linear(128, 1)
+		self.sigmoid = torch.nn.Sigmoid()		
+
+
 	def forward(self, x):
 		out = self.model(x)
-		output = self.fc2(self.fc1(out))
+		b, h, w, t, ch = out.shape
+		out = out.view(b, h * w * t * ch)
+		output = self.sigmoid(self.fc2(self.fc1(out)))
 		return output

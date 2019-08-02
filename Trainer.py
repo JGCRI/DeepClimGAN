@@ -1,7 +1,7 @@
 import numpy as np
 import os
 import sys
-from NETCDFDatasetDist import NETCDFDatasetDist
+from NETCDFDataPartition import NETCDFDataPartition
 from Discriminator import Discriminator
 from Generator import Generator
 from Normalizer import Normalizer
@@ -44,6 +44,9 @@ ex.observers.append(MongoObserver.create(url=DATABASE_URL, db_name=DATABASE_NAME
 #sampler.update(token, loss)
 
 
+
+
+
 #sacred configs
 @ex.config
 def my_config():
@@ -61,10 +64,10 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = True
+	add_noise = False
 	experience_replay = False
 	batch_size = int(sys.argv[5])
-	replay_buffer_size = batch_size * 4
+	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
 	num_epoch = int(sys.argv[2])
@@ -110,7 +113,7 @@ class Trainer:
 		netG.apply(ut.weights_init)		
 
 		#create optimizers
-		loss_func = torch.nn.CrossEntropyLoss()
+		loss_func = torch.nn.BCELoss()
 		if self.label_smoothing:
 			loss_func = torch.nn.KLDivLoss()
 		d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.5, 0.999])
@@ -125,9 +128,10 @@ class Trainer:
 		netG.to(device)
 		
 
-		#load specific partition for a node
-		#partition = []
-		ds = NETCDFDataPartition(partition)
+		#TEST
+
+		data_dir = '/pic/projects/GCAM/DeepClimGAN-input/MIROC5_Tensors/rcp26_r1i1p1.pt'
+		ds = NETCDFDataPartition(data_dir)
 		
 		#if self.apply_norm:
 		#	normalizer = Normalizer()
@@ -136,7 +140,8 @@ class Trainer:
 		
 		
 		#Specify that we are loading training set
-		sampler = DataSampler(self.batch_size, self.context_length, self.n_days)
+		data_len = ds.data.shape[-1]
+		sampler = DataSampler(self.batch_size, data_len, self.context_length, self.n_days)
 		b_sampler = data.BatchSampler(sampler, batch_size=self.batch_size, drop_last=True)
 		dl = data.DataLoader(ds, batch_sampler=b_sampler, num_workers=0)
 		dl_iter = iter(dl)
@@ -144,9 +149,8 @@ class Trainer:
 
 		
 		#Training loop
-		for current_epoch in range(1, self.num_epoch + 1):
-			n_updates = 1
-		
+		n_updates = 1
+		for current_epoch in range(1, self.num_epoch + 1):		
 			while True:
 				#sample batch
 				try:
@@ -166,9 +170,9 @@ class Trainer:
 					ts = np.full((self.batch_size), 0.9)
 					real_labels = ut.to_variable(torch.FloatTensor(ts), device, requires_grad = False)
 				else:
-					real_labels = ut.to_variable(torch.LongTensor(np.ones(self.batch_size, dtype=int)), device, requires_grad = False)
+					real_labels = ut.to_variable(torch.FloatTensor(np.ones(self.batch_size, dtype=int)), device, requires_grad = False)
 									
-				fake_labels = ut.to_variable(torch.LongTensor(np.zeros(self.batch_size, dtype = int)), device,requires_grad = False)
+				fake_labels = ut.to_variable(torch.FloatTensor(np.zeros(self.batch_size, dtype = int)), device,requires_grad = False)
 
 				#ship tensors to devices
 				current_month = current_month.to(device)
@@ -189,15 +193,11 @@ class Trainer:
 					if self.add_noise:
 						self.noise = GaussianNoise(device)
 						current_month = self.noise(current_month)
+					
 					input = ds.build_input_for_D(current_month, avg_context, high_res_context)				
 					
 					#1A. Train D on real
-					outputs = netD(input)
-					#bsz, ch, h, w, t = outputs.shape
-					#outputs = outputs.view(bsz, ch * h * w * t)
-					if self.label_smoothing:
-						outputs = torch.nn.Sigmoid(outputs)
-					
+					outputs = netD(input).squeeze()
 					d_real_loss = loss_func(outputs, real_labels)
 					d_real_loss.backward()	
 					#report d_real_loss
@@ -225,7 +225,7 @@ class Trainer:
 						D_input = fake_input_with_ctxt
 							
 					#outputs = netD(D_input.detach()).view(self.batch_size, ch * h * w * t)
-					outputs = netD(D_input.detach())
+					outputs = netD(D_input.detach()).squeeze()
 					
 					d_fake_loss = loss_func(outputs, fake_labels)
 					d_fake_loss.backward()
@@ -274,9 +274,7 @@ class Trainer:
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
 					g_outputs_fake = netG(z, avg_ctxt_for_G, high_res_for_G)
 					d_input = ds.build_input_for_D(g_outputs_fake, avg_context, high_res_context)
-					outputs = netD(d_input)
-					#bsz, c, h, w, t = outputs.shape
-					#outputs = outputs.view(bsz, c * h * w * t)
+					outputs = netD(d_input).squeeze()
 					g_loss = loss_func(outputs, real_labels)#compute loss for G
 					g_loss.backward()
 					g_optim.step()

@@ -1,6 +1,6 @@
 
 scenarios = ["rcp26", "rcp45", "rcp60", "rcp85", "historical"]
-realization = ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1"]
+realizations = ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1"]
 
 
 

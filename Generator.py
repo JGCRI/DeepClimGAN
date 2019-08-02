@@ -16,39 +16,42 @@ class Generator(nn.Module):
 		self.pool = pool2d()
 		self.relu = relu()
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
-	
-		
+			
 		#block 0
 		self.fc1 = fc(100, 512)
 		self.fc2 = fc(512, 4096)
 		
 		#block 1
 		self.upconv1 = upconv3d(128, 512)
-		self.init1 = conv2d(init_ctxt_channel_size, 64, 8, 8, 0)
-		#number 2 is two average map (precipitation and temperature)
-		self.avg1 = conv2d(2, 32, 8, 8, 0)
 		self.batchNorm5d_1 = batchNorm5d(512+64+32)
 		
 		#block 2
 		self.upconv2 = upconv3d(512+64+32, 256)
-		self.init2 = conv2d(init_ctxt_channel_size, 32, 4, 4, 0)
-		self.avg2 = conv2d(2, 16, 4, 4, 0)
 		self.batchNorm5d_2 = batchNorm5d(256+16+32)
 		
 		#block 3
 		self.upconv3 = upconv3d(256+16+32, 128)
-		self.init3 = conv2d(init_ctxt_channel_size, 16, 2, 2, 0)
-		self.avg3 = conv2d(2, 8, 2, 2, 0)
 		self.batchNorm5d_3 = batchNorm5d(128+16+8)
 
 		#block 4
 		self.upconv4 = upconv3d(128+16+8, 64)
-		self.init4 = conv2d(init_ctxt_channel_size, 8, 2, 2, 0)
-		self.avg4 = conv2d(2, 4, 2, 2, 0)
 		self.batchNorm5d_4 = batchNorm5d(64+8+4)
 		
 		#block 5
-		self.upconv5 = upconv3d(64+8+4, n_channels)
+		self.upconv5 = upconv3d(64+8+4, 32)
+		self.batchNorm5d_5 = batchNorm5d(32+2+init_ctxt_channel_size)
+		
+		#block 6
+		self.upconv6 = upconv3d_same(init_ctxt_channel_size+2+32, n_channels)
+
+		#convolutions for the contextx
+		self.init1 = conv2d(init_ctxt_channel_size, 8)				
+		self.conv2_4 = conv2d(2, 4)
+		self.conv4_8 = conv2d(4, 8)
+		self.conv8_16 = conv2d(8, 16)
+		self.conv16_32 = conv2d(16, 32)
+		self.conv32_64 = conv2d(32, 64)
+
 
 
 	def get_init_channel_size(self, t, ch):
@@ -62,46 +65,57 @@ class Generator(nn.Module):
 		param: high_res_context (tensor)
 		"""
 
-
 		#block 0
 		batch_size = x.shape[0]
 		x = self.fc2(self.fc1(x)).reshape(batch_size, 128, 4, 8, 1)
-		
-		
+				
 		#block 1
 		x = self.upconv1(x)
 		rep_factor = x.shape[-1] #time dimension of x, we should make contexts to match this size
-		init = self.pool(self.init1(high_res_context)).unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
-		avg = self.pool(self.avg1(avg_context)).unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
-		x = torch.cat([x, avg, init], dim=1)#concat across feature channels
+		init1 = self.pool(self.conv32_64(self.pool(self.conv16_32(self.pool(self.conv8_16(self.pool(self.init1(high_res_context))))))))
+		init1 = init1.unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
+		avg1 = self.pool(self.conv16_32(self.pool(self.conv8_16(self.pool(self.conv4_8(self.pool(self.conv2_4(avg_context))))))))
+		avg1 = avg1.unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)		
+		x = torch.cat([x, avg1, init1], dim=1)#concat across feature channels
 		x = self.relu(self.batchNorm5d_1(x))
 		
 		#block 2
 		x = self.upconv2(x)
 		rep_factor = x.shape[-1]
-		avg = self.pool(self.avg2(avg_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
-		init = self.pool(self.init2(high_res_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
-		x = torch.cat([x, avg, init],dim=1)
+		init2 = self.pool(self.conv16_32(self.pool(self.conv8_16(self.pool(self.init1(high_res_context))))))
+		init2 = init2.unsqueeze(-1).repeat(1,1,1,1, rep_factor)
+		avg2 = self.pool(self.conv8_16(self.pool(self.conv4_8(self.pool(self.conv2_4(avg_context))))))
+		avg2 = avg2.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
+		x = torch.cat([x, avg2, init2],dim=1)
 		x = self.relu(self.batchNorm5d_2(x))
 		
 		#block3
 		x = self.upconv3(x)
 		rep_factor = x.shape[-1]
-		avg = self.pool(self.avg3(avg_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
-		init = self.pool(self.init3(high_res_context)).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
-		x = torch.cat([x, avg, init],dim=1)
+		init3 = self.pool(self.conv8_16(self.pool(self.init1(high_res_context)))) 
+		init3 = init3.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
+		avg3 = self.pool(self.conv4_8(self.pool(self.conv2_4(avg_context))))
+		avg3 = avg3.unsqueeze(-1).repeat(1,1,1,1,rep_factor)		
+		x = torch.cat([x, avg3, init3],dim=1)
 		x = self.relu(self.batchNorm5d_3(x))
 
 		#block4
 		x = self.upconv4(x)
 		rep_factor = x.shape[-1]
-		avg = self.avg4(avg_context).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
-		init = self.init4(high_res_context).unsqueeze(-1).repeat(1,1,1,1,rep_factor)
-		x = torch.cat([x, avg, init],dim=1)
+		init4 = self.pool(self.init1(high_res_context)) 
+		init4 = init4.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
+		avg4 = self.pool(self.conv2_4(avg_context))
+		avg4 = avg4.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
+		x = torch.cat([x, avg4, init4],dim=1)
 		x = self.relu(self.batchNorm5d_4(x))
 			
 		#block5
 		x = self.upconv5(x)
-		out = x
+		rep_factor = x.shape[-1]
+		init5 = high_res_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
+		avg5 = avg_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
+		x = torch.cat([x, init5, avg5],dim=1)
+		x = self.relu(self.batchNorm5d_5(x))
+		out = self.upconv6(x)
 		return out
 

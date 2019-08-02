@@ -11,13 +11,13 @@ class DataSampler(Sampler):
 	"""
 
 
-	def __init__(self,batch_size, context_window, n_days):
+	def __init__(self, batch_size, data_len, context_window, n_days):
 		"""
 		Initialize sampler
 		"""
 		self.batch_size = batch_size
 		idx_start = context_window
-		idx_end = self.train_data.shape[-1] - n_days - 1
+		idx_end = data_len - n_days - 1
 		self.idx_range = [idx_start, idx_end]
 		self.indices = self.get_indices()
 

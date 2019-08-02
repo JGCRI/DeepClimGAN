@@ -5,40 +5,29 @@ import torch
 import torch.distributed as dist
 import os
 import numpy as np
-from Constants import scenarios, realization, clmt_vars
+from Constants import scenarios, realizations, clmt_vars
 from Normalizer import Normalizer
 
-def main(sorted_files, node_storage, nrm):
+def main(partitition, nrm):
 	
 	rank = dist.get_rank()
 	comm_size = dist.get_world_size()
+
+	files_per_node = partition[rank]
 	
-	#TODO:
-	#size = end = 0
-	#while size < node_storage_files:
-	#	size += os.path.getsize(sorted_files[pt])	
-	#	end += 1
-	#
-	#files = sorted_files[start:end]
-
-
-	tas_tsr, tasmin_tsr, tasmax_tsr, rhsmax_tsr, rhsmin_tsr, rhs_tsr = None
+	tas_tsr = tasmin_tsr = tasmax_tsr = rhsmax_tsr = rhsmin_tsr = rhs_tsr = None
 	tas_tsrs, tasmin_tsrs, tasmax_tsrs, rhsmax_tsrs, rhsmin_tsrs, rhs_tsrs = [[] for i in range(6)]
 
-	for file in files:
+
+	clmt_var_keys = list(clmt_vars.keys())
+	for file in files_per_node:
 		tsr = torch.load(file)
-		if 'tas' in file:
-			tas_tsrs.append(tsr[clmt_vars['tas']])
-		elif 'tasmin' in file:
-			tasmin_tsrs.append(tsr[clmt_vars['tasmin']])
-		elif 'tasmax' in file:
-			tasmax_tsrs.append(tsr[clmt_vars['tasmax']])
-		elif 'rhsmin' in file:
-			rhsmin_tsrs.append(tsr[clmt_vars['rhsmin']])
-		elif 'rhsmax' in file:
-			rhsmax_tsrs.append(tsr[clmt_vars['rhsmax']])
-		elif 'rhs' in file:
-			rhs_tsrs.append(tsr[clmt_vars['rhs']])
+		tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
+		tasmin_tsrs.append(tsr[clmt_var_keys.index('tasmin')])
+		tasmax_tsrs.append(tsr[clmt_var_keys.index('tasmax')])
+		rhsmin_tsrs.append(tsr[clmt_var_keys.index('rhsmin']))
+		rhsmax_tsrs.append(tsr[clmt_var_keys.index('rhsmax')])
+		rhs_tsrs.append(tsr[clmt_var_keys.index('rhs')])
 	
 
 	#stack all variables
@@ -66,12 +55,12 @@ def main(sorted_files, node_storage, nrm):
 	rhsmax_mean = rhsmax_tsr[0] / tsr_sz
 
 	#compute variance
-	tas_sq_diff = tsr[clmt_vars['tas']] - tas_mean
-	tasmin_sq_diff = tsr[clmt_vars['tasmin']] - tasmin_mean
-	tasmax_sq_diff = tsr[clmt_vars['tasmax']] - tasmax_mean
-	rhs_sq_diff = tsr[clmt_vars['rhs']] - rhs_mean
-	rhsmin_sq_diff =tsr[clmt_vars['rhsmin']] - rhsmin_mean
-	rhsmax_sq_diff = tsr[clmt_vars'rhsmax']] - rhsmax_mean
+	tas_sq_diff = tsr[clmt_var_keys.index('tas')] - tas_mean
+	tasmin_sq_diff = tsr[clmt_var_keys.index('tasmin')] - tasmin_mean
+	tasmax_sq_diff = tsr[clmt_var_keys.index('tasmax')] - tasmax_mean
+	rhs_sq_diff = tsr[clmt_var_keys.index('rhs')] - rhs_mean
+	rhsmin_sq_diff =tsr[clmt_var_keys.index('rhsmin')] - rhsmin_mean
+	rhsmax_sq_diff = tsr[clmt_var_keys.index('rhsmax')] - rhsmax_mean
 
 
 	#reduce sum of squared differences among all the nodes
@@ -91,7 +80,7 @@ def main(sorted_files, node_storage, nrm):
 	for file in files_per_node:
 		tsr = torch.load(file)
 		norm_tsr = nrm.normalize(tsr)
-		torch.save(norm_tsr, 'norm_' + 'file' + '.pt')
+		torch.save(norm_tsr, 'norm_' + file + '.pt')
 
 
 
@@ -105,19 +94,38 @@ if __name__ == '__main__':
 	sorted_files = sort_files_by_size(file_dir)
 	
 	nrm = Normalizer()
-
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--local_rank', type=int)
 	args = parser.parse_args()
 
 	rank = args.local_rank
-	node_size = args.node_size
-	
+	node_size = args.node_size * 1073741824
+	empty_space = node_size * 0.05 * 1073741824 #use only 95 % of the node capacity
+
+
 	print(f'localrank: {rank}	host: {os.uname()[1]}')
 
 	
+	#create mapping for nodes to process the files
+	partition = {}
+	node_rank = 0
+	for file in sorted_files:
+		location = os.path.join(file_dir, file)
+		file_sz = os.path.getsize(location)
+
+		if size == 0:
+			partition[node_rank] = [file]
+			size += file_sz
+		while size < node_size - empty_space:
+			partition[node_rank].append(file)
+			size += file_sz
+		
+		size = 0
+		node_rank += 1
+
+	
 	dist.init_process_group('gloo', 'env://')
-	main(sorted_files, node_storage, nrm)
+	main(partitition, nrm)
 	
 	
