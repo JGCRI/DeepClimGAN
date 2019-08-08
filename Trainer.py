@@ -8,16 +8,18 @@ from Normalizer import Normalizer
 import torch
 import torch.nn as nn
 from torch.utils import data
-from Constants import clmt_vars
+from Constants import clmt_vars, GB_to_B
 from tqdm import tqdm
 from torch.autograd import Variable
 from DataSampler import DataSampler
-#import chocolate as choco
 import logging
 from sacred import Experiment
 from sacred.observers import MongoObserver
 import Utils as ut
 from Utils import GaussianNoise
+from Utils import sort_files_by_size, snake_data_partition
+import torch.distributed as dist
+import argparse
 
 ex = Experiment('Add noise to D')
 
@@ -28,25 +30,6 @@ DATABASE_NAME = "climate_gan"
 
 ex.observers.append(MongoObserver.create(url=DATABASE_URL, db_name=DATABASE_NAME))
 
-#establish conenction to a SQLite database for optimization
-#conn = choco.SQLiteConnection("sqlite://bayes.db")
-
-#Construct the optimizer
-#sampler = choco.Bayes(conn, space)
-
-#Sample the next point
-#token, params = sampler.next()
-
-#Calculate the loss for the sampled point (minimzed)
-#loss = objective_function(**params)
-
-#Add the loss to the database
-#sampler.update(token, loss)
-
-
-
-
-
 #sacred configs
 @ex.config
 def my_config():
@@ -56,8 +39,6 @@ def my_config():
 	n_days = 32
 	apply_norm = True
 	
-	#Percent of data to use, default = use all
-	data_pct = 1
 	#Percent of data to use for training
 	train_pct = 0.7
 	data_dir = sys.argv[3]
@@ -73,17 +54,23 @@ def my_config():
 	num_epoch = int(sys.argv[2])
 	scenario = sys.argv[6]		
 	number_of_files = int(sys.argv[7])
+	node_size = int(sys.argv[8]) * GB_to_B
 
 class Trainer:
 	@ex.capture
-	def __init__(self):
+	def __init__(self, lrank):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
 		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct, self.replay_buffer_size,  self.scenario, self.number_of_files = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
 		#buffer for expereince replay		
 		self.replay_buffer = []
-		
+		self.sorted_files = sort_files_by_size(self.data_dir)
+		self.node_size  = self.get_node_params()
+		self.world_size = dist.get_world_size()		
+		self.partition = snake_data_partition(self.sorted_files, self.node_size, self.world_size)
+		self.lrank = lrank
+
 	@ex.capture
 	def set_parameters(self, lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir):
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
@@ -93,6 +80,11 @@ class Trainer:
 		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files
 
 
+	@ex.capture
+	def set_node_params(self, node_size):
+		return node_size
+
+	
 	@ex.capture
 	def get_exp_info(self, _run):
 		exp_id = _run._id
@@ -128,22 +120,19 @@ class Trainer:
 		netG.to(device)
 		
 
-		#TEST
+		comm_size = self.world_size()
 
-		data_dir = '/pic/projects/GCAM/DeepClimGAN-input/MIROC5_Tensors/rcp26_r1i1p1.pt'
-		ds = NETCDFDataPartition(data_dir)
+		#reset the batch size based on the number of processes used
+		self.batch_size = self.batch_size // comm_size
 		
-		#if self.apply_norm:
-		#	normalizer = Normalizer()
-		#	#normalize training set
-		#	ds.normalized_train = normalizer.normalize(ds, 'train')
-		
-		
+		rank = dist.get_rank()
+		partition = self.partition[rank]
+		ds = NETCDFDataPartition(partition, self.data_dir)
+				
 		#Specify that we are loading training set
-		data_len = ds.data.shape[-1]
-		sampler = DataSampler(self.batch_size, data_len, self.context_length, self.n_days)
+		sampler = DataSampler(self.batch_size, ds.data, self.context_length, self.n_days)
 		b_sampler = data.BatchSampler(sampler, batch_size=self.batch_size, drop_last=True)
-		dl = data.DataLoader(ds, batch_sampler=b_sampler, num_workers=0)
+		dl = data.DataLoader(ds, batch_sampler=b_sampler)
 		dl_iter = iter(dl)
 	
 
@@ -199,7 +188,11 @@ class Trainer:
 					#1A. Train D on real
 					outputs = netD(input).squeeze()
 					d_real_loss = loss_func(outputs, real_labels)
-					d_real_loss.backward()	
+					d_real_loss.backward()
+
+					#average gradients
+					average_gradients(netD)
+						
 					#report d_real_loss
 					self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates)
 				
@@ -224,11 +217,14 @@ class Trainer:
 					else:
 						D_input = fake_input_with_ctxt
 							
-					#outputs = netD(D_input.detach()).view(self.batch_size, ch * h * w * t)
 					outputs = netD(D_input.detach()).squeeze()
 					
 					d_fake_loss = loss_func(outputs, fake_labels)
 					d_fake_loss.backward()
+					
+					#average gradients
+					average_gradients(netD)
+					
 					#report d_fake_loss
 					self._run.log_scalar('d_fake_loss', d_fake_loss.item(), n_updates)
 					
@@ -237,7 +233,7 @@ class Trainer:
 					#report d_loss
 					self._run.log_scalar('d_loss', d_loss.item(), n_updates)
 					
-					#Update D
+					#Update weights of D
 					d_optim.step()
 					
 					#Update experience replay
@@ -277,6 +273,11 @@ class Trainer:
 					outputs = netD(d_input).squeeze()
 					g_loss = loss_func(outputs, real_labels)#compute loss for G
 					g_loss.backward()
+					
+					#average gradients
+					average_gradients(netG)
+				
+					#update weights of G				
 					g_optim.step()
 					
 					logging.info("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
@@ -285,14 +286,26 @@ class Trainer:
 				n_updates += 1	
 
 
-@ex.main
+def average_gradients(model):
+	size = float(dist.get_world_size())
+	for param in modell.parameters():
+		dist.all_reduce(param.grad.data, op=dist.reduce_op.SUM)
+		param.grad.data /= size
+	
+
+@ex.automain
 def main(_run):
-	t = Trainer()
+	
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--local_rank', type=int)
+	args = parser.parse_args()
+	
+	lrank = args.local_rank
+	print(f'localrank: {lrank}	host: {os.uname()[1]}')
+	torch.cuda.set_device(lrank)
+
+	dist.init_process_group('nccl', 'env://'))
+	
+	t = Trainer(lrank)
 	t.run()
 
-
-if __name__ == "__main__":
-	num_experiments = 1
-	
-	for i in range(num_experiments):
-		ex.run()

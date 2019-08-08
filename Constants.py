@@ -1,7 +1,7 @@
 
-scenarios = ["rcp26", "rcp45", "rcp60", "rcp85", "historical"]
+#scenarios = ["rcp26", "rcp45", "rcp60", "rcp85", "historical"]
 realizations = ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1"]
-
+scenarios = ["historical"]
 
 
 rhs_day_dir = 'rhs_day_MIROC5_'
@@ -22,3 +22,6 @@ clmt_vars = {
 	'rhsmax' : [rhs_max_dir,'stand'],
 	'rhs' : [rhs_day_dir,'stand']
 }
+
+
+GB_to_B = 1073741824

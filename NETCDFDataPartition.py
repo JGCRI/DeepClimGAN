@@ -16,7 +16,6 @@ n_days = 32
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
-batch_size = 16
 
 class NETCDFDataPartition(data.Dataset):
 
@@ -27,24 +26,29 @@ class NETCDFDataPartition(data.Dataset):
 		param: data_pct (float) Percent of data to use for training, development and testing
 		param: train_pct (float) Percent of data to use for training
 		"""
-
-		#self.train_len, self.dev_len, self.test_len = self.create_split_bounds(self.len, train_pct)
-		self.data = self.load_tensors(data_dir)
-
+		self.data = self.load_tensors(partition, data_dir)
 
 	def __len__(self):
 		"""
 		Number of days (datapoints ) in the dataset
 		"""
+		#return self.data.shape[-1]
 		return self.len
+		
+	def load_tensors(self, partition, data_dir):
+		
+		#merge tensors
+		tensors = []
+		self.len = 0
+		for file in partition:
+			location = os.path.join(data_dir, file)
+			data = torch.load(location)
+			self.len += data.shape[-1]
+			tensors.append(data)
+		return tensors
 
-	def load_tensors(self, data_dir):
 
-		data = torch.load(data_dir)
-		return data
-
-
-	def __getitem__(self, idx):
+	def __getitem__(self,file_idx, idx):
 		"""
 		Extracts one datapoint, which is one month of records.
 		param: idx (int) batch idx
@@ -54,9 +58,11 @@ class NETCDFDataPartition(data.Dataset):
 		avg_context(tensor) HxWx(T+context_window)x2 avg maps expanded to match the time dimension
 		high_res_context (tensor) HxWxcontext_windowxC N previous days
 		"""
+	
 		#first 5 days are reserved for the context
 		start = context_window
-		train = self.data
+		
+		train = self.data[file_idx]
 		current_month = train[:, :, : , idx:(idx + n_days)] #output size is N_channels x H x W x 32
 		high_res_context = train[:, :, :, (idx - context_window):idx]
 		#get context
@@ -94,6 +100,7 @@ class NETCDFDataPartition(data.Dataset):
 		param: avg_context(tensor) Bx2xHxWx(T+context_window) avg monthly precipitation and avg monthly temperature
 		param: high_res_context (tensor) BxCxHxWx5 5 previous days
 		"""
+
 		last_and_curr = torch.cat([high_res_context, input], dim=4)
 		input = torch.cat([last_and_curr, avg_context], dim=1)
 		return input

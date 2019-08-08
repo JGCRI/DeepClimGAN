@@ -12,10 +12,10 @@ import argparse
 
 class DataPreprocessor():
 
-	def __init__(self, data_dir, scenarios, realizations, end_date):
-		self.total_len, self.n_files = self.build_save_tensors_for_all_scenarios(data_dir, scenarios, realizations, end_date)
+	def __init__(self, data_dir, scenarios, realizations, start_date, end_date):
+		self.total_len, self.n_files = self.build_save_tensors_for_all_scenarios(data_dir, scenarios, realizations, start_date, end_date)
 	
-	def build_save_tensors_for_all_scenarios(self, data_dir,scenarios, realizations, end_date):
+	def build_save_tensors_for_all_scenarios(self, data_dir,scenarios, realizations, start_date, end_date):
 		total_len = 0
 		save_dir = sys.argv[2]
 		filenames = os.listdir(data_dir)
@@ -24,7 +24,7 @@ class DataPreprocessor():
 		for scenario in scenarios:
 			for realiz in realizations:
 				prefix = scenario + "_" + realiz
-				tensor, tensor_len, num_files = self.build_dataset(data_dir, filenames, prefix, end_date)
+				tensor, tensor_len, num_files = self.build_dataset(data_dir, filenames, prefix, start_date, end_date)
 				#save tensor as torch array to the folder
 				ts_name = os.path.join(save_dir, prefix)
 				torch.save(tensor, ts_name + ".pt")
@@ -47,7 +47,7 @@ class DataPreprocessor():
                 return var
 
 
-	def build_dataset(self, data_dir, filenames, prefix, end_date):
+	def build_dataset(self, data_dir, filenames, prefix, start_date, end_date):
 		"""
 		Builds dataset out of all climate variables of shape HxWxNxC, where:
 		N - #of datapoints (days)
@@ -71,7 +71,8 @@ class DataPreprocessor():
 			pattern = var_name + prefix
 			for i in range(len(filenames)):
 				file_end_year = int(filenames[i][-11:-7])
-				if pattern in filenames[i] and file_end_year <= end_date:
+				file_start_year = int(filenames[i][-20:-16])
+				if pattern in filenames[i] and file_end_year <= end_date and file_start_year >= start_date:
 					my_files.append(filenames[i])
 		
 			n_files += len(my_files)
@@ -83,7 +84,10 @@ class DataPreprocessor():
 			#concatenate tensors along the size dimension
 			concat_tsr = torch.cat(tensors_per_clmt_var, dim=0)
 			all_tensors.append(concat_tsr)
-		
+
+
+		for t in all_tensors:
+			print(t.shape)		
 		res_tsr = torch.stack(all_tensors, dim=3)
 		tensor_len = res_tsr.shape[0]
 		
@@ -94,9 +98,10 @@ class DataPreprocessor():
 def main():
 	
 	file_dir = sys.argv[1]
-	end_date = int(sys.argv[3])
+	start_date = int(sys.argv[3])
+	end_date = int(sys.argv[4])
 	#load and save files as tensors
-	processor = DataPreprocessor(file_dir, scenarios, realizations, end_date)	
+	processor = DataPreprocessor(file_dir, scenarios, realizations, start_date, end_date)	
 
 		
 main()

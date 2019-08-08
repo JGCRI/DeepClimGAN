@@ -5,6 +5,8 @@ import os
 import numpy as np
 import torch.nn as nn
 import torch
+from Constants import scenarios
+
 
 def weights_init(m):
 	"""
@@ -104,8 +106,82 @@ def sort_files_by_size(directory):
     		pairs.append((size, file))
 
 	# Sort list of tuples by the first element, size.
-	pairs.sort(key=lambda s: s[0])
+	pairs.sort(key=lambda s: s[0], reverse=True)
 	return pairs
+
+def partition_data_between_nodes(sorted_files, node_size, empty_space, n_proc_per_node):
+	partition = {}
+	node_rank = 0
+	size = 0
+	node_size_per_proc = (node_size - empty_space) // n_proc_per_node
+	for i, (f_size, file) in enumerate(sorted_files):
+		size += f_size
+		if size < node_size_per_proc and size != f_size:
+			partition[node_rank].append(file)
+		else:
+			if size > node_size_per_proc:
+				node_rank += 1
+			size = f_size
+			partition[node_rank] = [file]
+	return partition
+
+
+def get_node_size():
+	pass
+
+
+
+
+def snake_data_partition(sorted_files, world_size):
+	partition = {}
+	n_processes = world_size
+	file_groups = []
+	i = 0
+
+	N = len(sorted_files)
+	
+	files = []
+	for file in sorted_files:
+		files.append(file[1])
+	sorted_files = files
+	
+	#split files per groups
+	while i < N:
+		if i + n_processes > N:
+			group = sorted_files[i:]
+		else:
+			group = sorted_files[i:i+n_processes]
+		
+		file_groups.append(group)
+		
+		i += n_processes	
+
+	#distribute files between processes
+	i = 0
+	N_groups = len(file_groups)
+	
+	while i < N_groups:
+		group = file_groups[i]
+		group_len = len(group)
+		#first group goes from left to right
+		#then from right to left
+		if i % 2 == 0:
+			if i == 0:
+				for j in range(0,group_len):
+					partition[j] = [group[j]]
+			else:
+				for j in range(0,group_len):
+					partition[j].append(group[j])
+		else:
+			group = group[::-1]
+			for j in range(group_len):
+				part = partition[world_size - 1 - j]
+				part.append(group[j])
+
+		
+		i += 1
+	return partition
+
 
 
 class GaussianNoise(nn.Module):
