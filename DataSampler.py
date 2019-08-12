@@ -22,6 +22,7 @@ class DataSampler(Sampler):
 		idx_start = context_window
 		self.batch_size = batch_size
 		self.total_len = 0
+		
 		for i in range(n_files):
 			data_len = data[i].shape[-1]
 			idx_end = data_len - n_days - 1
@@ -30,7 +31,8 @@ class DataSampler(Sampler):
 			self.total_len += len(indices)
 			file_indices.append(indices)	
 
-
+		file_indices = np.asarray(file_indices)
+		
 			
 	def get_indices(self, idx_range):
 		"""
@@ -47,6 +49,8 @@ class DataSampler(Sampler):
 		batch_size = self.batch_size
 		n_batches = (ub - lb) // batch_size + 1
 		indices = [i for i in range(lb, ub + 1)]
+		indices = np.asarray(indices)
+		
 		return indices		
 	
 
@@ -56,9 +60,12 @@ class DataSampler(Sampler):
 		"""
 		files = self.file_indices
 		#permute indices within a file
-		for indices in files:
-			indices = np.random.permutation(indices)
+		for i in range(len(files)):
+			files[i] = np.random.permutation(files[i])
 		
+
+		#permute an order of files
+		files = np.random.permutation(files)
 
 	def __iter__(self):
 		"""
@@ -67,8 +74,9 @@ class DataSampler(Sampler):
 		n_files = self.n_files
 		#i is a file in the partition, j is the index
 		for i in range(n_files):
-			for j in range(len(n_files[i]):
-				return i, j
+			file_len = len(n_files[i])
+			for j in range(file_len):
+				return n_files[i][j]
 		#return (self.indices[i] for i in range(len(self.indices)))
 				
 

@@ -21,7 +21,7 @@ from Utils import sort_files_by_size, snake_data_partition
 import torch.distributed as dist
 import argparse
 
-ex = Experiment('Add noise to D')
+ex = Experiment('First experiment with distributed training')
 
 
 #MongoDB
@@ -40,49 +40,40 @@ def my_config():
 	apply_norm = True
 	
 	#Percent of data to use for training
-	train_pct = 0.7
+	num_epoch = int(sys.argv[2])
 	data_dir = sys.argv[3]
+	batch_size = int(sys.argv[4])
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
 	add_noise = False
 	experience_replay = False
-	batch_size = int(sys.argv[5])
 	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
-	num_epoch = int(sys.argv[2])
-	scenario = sys.argv[6]		
-	number_of_files = int(sys.argv[7])
-	node_size = int(sys.argv[8]) * GB_to_B
 
 class Trainer:
 	@ex.capture
-	def __init__(self, lrank):
+	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct, self.train_pct, self.replay_buffer_size,  self.scenario, self.number_of_files = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct,self.replay_buffer_size  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
+		
 		#buffer for expereince replay		
 		self.replay_buffer = []
 		self.sorted_files = sort_files_by_size(self.data_dir)
-		self.node_size  = self.get_node_params()
 		self.world_size = dist.get_world_size()		
-		self.partition = snake_data_partition(self.sorted_files, self.node_size, self.world_size)
-		self.lrank = lrank
+		self.partition = snake_data_partition(self.sorted_files, self.world_size)
 
 	@ex.capture
 	def set_parameters(self, lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir):
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, train_pct, replay_buffer_size, scenario, number_of_files
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, replay_buffer_size):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, replay_buffer_size
 
-
-	@ex.capture
-	def set_node_params(self, node_size):
-		return node_size
 
 	
 	@ex.capture
@@ -289,23 +280,27 @@ class Trainer:
 def average_gradients(model):
 	size = float(dist.get_world_size())
 	for param in modell.parameters():
-		dist.all_reduce(param.grad.data, op=dist.reduce_op.SUM)
+		dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
 		param.grad.data /= size
 	
 
-@ex.automain
+@ex.main
 def main(_run):
-	
+
+	t = Trainer()
+	t.run()
+
+
+
+if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--local_rank', type=int)
 	args = parser.parse_args()
-	
 	lrank = args.local_rank
 	print(f'localrank: {lrank}	host: {os.uname()[1]}')
+
+
 	torch.cuda.set_device(lrank)
-
-	dist.init_process_group('nccl', 'env://'))
+	dist.init_process_group('nccl', 'env://')
 	
-	t = Trainer(lrank)
-	t.run()
-
+	

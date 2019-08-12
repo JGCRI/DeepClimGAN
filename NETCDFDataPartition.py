@@ -7,7 +7,6 @@ import random
 from Constants import clmt_vars, scenarios, realizations
 from torch.utils import data
 from torch.distributions.multivariate_normal import MultivariateNormal
-import logging
 
 #default params
 lat = 128
@@ -36,15 +35,23 @@ class NETCDFDataPartition(data.Dataset):
 		return self.len
 		
 	def load_tensors(self, partition, data_dir):
-		
+		'''
+		Load tensors for training from the partition
+
+		param: partition (list) names of the files for current process
+		param: data_dir (str) directory to load tensors from
+
+		return tensors
+		'''
+
 		#merge tensors
 		tensors = []
 		self.len = 0
 		for file in partition:
 			location = os.path.join(data_dir, file)
-			data = torch.load(location)
-			self.len += data.shape[-1]
-			tensors.append(data)
+			tensor = torch.load(location)
+			self.len += tensor.shape[-1]
+			tensors.append(tensor)
 		return tensors
 
 
@@ -84,6 +91,7 @@ class NETCDFDataPartition(data.Dataset):
 		param: avg_context (tensor) Bx2xHxWx(T+context_window)
 		param: high_res_context (tensor) BxCxHxWx5 5 previous days
 		"""
+		
 		channels, context_length = high_res_context.shape[1], high_res_context.shape[-1]
 		batch_size = avg_context.shape[0]
 		lon, lat = avg_context.shape[2], avg_context.shape[3]
@@ -99,6 +107,8 @@ class NETCDFDataPartition(data.Dataset):
 		param: input (tensor) BxCxHxWxT produced by G
 		param: avg_context(tensor) Bx2xHxWx(T+context_window) avg monthly precipitation and avg monthly temperature
 		param: high_res_context (tensor) BxCxHxWx5 5 previous days
+		
+		return input for D
 		"""
 
 		last_and_curr = torch.cat([high_res_context, input], dim=4)
@@ -106,39 +116,15 @@ class NETCDFDataPartition(data.Dataset):
 		return input
 
 
-	def create_split_bounds(self, N, train_pct):
-		#reference: https://github.com/hutchresearch/ml_climate17/blob/master/resnet/utils/DataHelper.py
-		"""
-		Computes split bounds for train, dev and test.
-		:param N (int) Length of the dataset
-		:param train_pct=0.7 (float) Percent of data to use for training
-		:return: train (default to 70% of all data)
-		:return: dev (default to 15% of all data)
-		:return: test (default to 15% of all data)
-		"""
-
-		train_len = int(round(train_pct * N))
-		if (N - train_len) % 2 == 1:
-		        train_len += 1
-
-		#NOTE: We assume that dev_len = test_len
-		dev_len = test_len = int((N - train_len) / 2)
-
-		assert "Not all data points are being used. Check create_split_bounds()", \
-		        (train_len + dev_len + test_len) == N
-
-
-		return train_len, dev_len, test_len
-
-
-
 	def get_noise(self, N, batch_size):
 		"""
 		Creates a multivariate normal (Gaussian) distribution
 		parametrized by a mean vector and a covariance matrix
 		param: N (int) Dimension of a distribution
+		
 		return sample from N-dimensional Gaussian distribution
 		"""
+		
 		m = MultivariateNormal(torch.zeros(N), torch.eye(N))
 		#check if need diff noise for multi-batch
 		samples = []
@@ -158,6 +144,7 @@ class NETCDFDataPartition(data.Dataset):
 
 		return expanded map (tensor)
 		"""
+		
 		map = x.mean(2) #H x W x 1 x 1, we want to expand it to H x W x (T + context_window) x 1
 		map = map.unsqueeze(-1).unsqueeze(-1)
 		map = map.permute(3, 0, 1, 2)

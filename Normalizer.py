@@ -53,7 +53,6 @@ class Normalizer:
                 if norm_type == 'log_norm':
                         tsr[i] = self.log_normalize_channel(tsr[i])
                 elif norm_type == 'stand':
-                        self.clmt_stats[var] = [mean, std]
                         tsr[i] = self.standartize_channel(tsr[i], var)
-        return data
+        return tsr
 
