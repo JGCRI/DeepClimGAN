@@ -24,8 +24,7 @@ def weights_init(m):
 		m.weight.data.normal_(1.0, 0.02)
 		m.bias.data.fill_(0)
 
-def to_variable(x, device,requires_grad=True):
-	x = x.to(device)
+def to_variable(x, requires_grad=True):
 	return Variable(x, requires_grad)
 
 def save_grads(model, model_name):
@@ -126,11 +125,6 @@ def partition_data_between_nodes(sorted_files, node_size, empty_space, n_proc_pe
 	return partition
 
 
-def get_node_size():
-	pass
-
-
-
 
 def snake_data_partition(sorted_files, world_size):
 	partition = {}
@@ -183,6 +177,15 @@ def snake_data_partition(sorted_files, world_size):
 	return partition
 
 
+def get_node_size(file_name):
+        GB_to_KB = 1048576
+        with open(file_name, 'r') as of:
+                line = of.readlines(0)[0]
+                info = line.split(" ")
+                size = int(info[-2]) * GB_to_KB
+                return size
+
+
 
 class GaussianNoise(nn.Module):
 	def __init__(self, device, stddev=0.2, is_relative_detach=True, is_training=True):
@@ -194,7 +197,8 @@ class GaussianNoise(nn.Module):
 
 	def forward(self, x):
 		if self.is_training and self.stddev != 0:
-			noise = Variable(torch.randn(x.size()).to(self.device) * self.stddev)
+			tsr = torch.randn(x.size()).cuda()
+			noise = Variable(tsr * self.stddev)
 			x = x + noise
 		return x
 			

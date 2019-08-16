@@ -1,7 +1,7 @@
 from torch.utils.data.sampler import Sampler
 import torch
 import numpy as np
-
+import logging as log
 
 class DataSampler(Sampler):
 	"""
@@ -16,6 +16,7 @@ class DataSampler(Sampler):
 		Initialize sampler
 		"""
 
+		self.data = data
 		self.n_files = len(data)
 		self.file_indices = []
 		
@@ -23,15 +24,15 @@ class DataSampler(Sampler):
 		self.batch_size = batch_size
 		self.total_len = 0
 		
-		for i in range(n_files):
+		for i in range(self.n_files):
 			data_len = data[i].shape[-1]
 			idx_end = data_len - n_days - 1
 			self.idx_range = [idx_start, idx_end]
-			indices = self.get_indices(idx_range)
+			indices = self.get_indices(self.idx_range)
 			self.total_len += len(indices)
-			file_indices.append(indices)	
+			self.file_indices.append(indices)	
 
-		file_indices = np.asarray(file_indices)
+		self.file_indices = np.asarray(self.file_indices)
 		
 			
 	def get_indices(self, idx_range):
@@ -60,23 +61,27 @@ class DataSampler(Sampler):
 		"""
 		files = self.file_indices
 		#permute indices within a file
+		log.info("Permuting indices in each file")
 		for i in range(len(files)):
 			files[i] = np.random.permutation(files[i])
 		
 
 		#permute an order of files
+		log.info("permute order of files")
 		files = np.random.permutation(files)
+		
 
 	def __iter__(self):
 		"""
 		Iterator itself
 		"""
 		n_files = self.n_files
-		#i is a file in the partition, j is the index
-		for i in range(n_files):
-			file_len = len(n_files[i])
-			for j in range(file_len):
-				return n_files[i][j]
+		file_indices = self.file_indices
+		
+		#i is a file in the partition, [i][j] is the index in the file
+		for i in range(len(file_indices)):
+			return ((i, file_indices[i][j]) for j in range(len(file_indices[i])))
+			
 		#return (self.indices[i] for i in range(len(self.indices)))
 				
 

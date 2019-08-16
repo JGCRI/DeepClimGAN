@@ -18,7 +18,7 @@ context_window = 5
 
 class NETCDFDataPartition(data.Dataset):
 
-	def __init__(self, data_dir):
+	def __init__(self,partition,data_dir):
 		"""
 		Init the dataset
 
@@ -55,7 +55,7 @@ class NETCDFDataPartition(data.Dataset):
 		return tensors
 
 
-	def __getitem__(self,file_idx, idx):
+	def __getitem__(self, ids):
 		"""
 		Extracts one datapoint, which is one month of records.
 		param: idx (int) batch idx
@@ -68,6 +68,7 @@ class NETCDFDataPartition(data.Dataset):
 	
 		#first 5 days are reserved for the context
 		start = context_window
+		file_idx, idx  = ids
 		
 		train = self.data[file_idx]
 		current_month = train[:, :, : , idx:(idx + n_days)] #output size is N_channels x H x W x 32

@@ -20,6 +20,7 @@ from Utils import GaussianNoise
 from Utils import sort_files_by_size, snake_data_partition
 import torch.distributed as dist
 import argparse
+import logging
 
 ex = Experiment('First experiment with distributed training')
 
@@ -39,11 +40,6 @@ def my_config():
 	n_days = 32
 	apply_norm = True
 	
-	#Percent of data to use for training
-	num_epoch = int(sys.argv[2])
-	data_dir = sys.argv[3]
-	batch_size = int(sys.argv[4])
-	
 	#hyperparamteres TODO:
 	label_smoothing = False
 	add_noise = False
@@ -56,7 +52,7 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.data_pct,self.replay_buffer_size  = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
 		
@@ -71,10 +67,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, replay_buffer_size):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, data_pct, replay_buffer_size
-
-
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss
 	
 	@ex.capture
 	def get_exp_info(self, _run):
@@ -87,8 +81,6 @@ class Trainer:
 		"""
 		Main routine
 		"""
-
-		device = self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")		
 		#build models
 		netD = Discriminator(self.label_smoothing)
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)
@@ -102,22 +94,25 @@ class Trainer:
 		d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.5, 0.999])
 		g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.5, 0.999])
 				
-	
+		
+		device = torch.cuda.current_device()
+
 		#use all possible GPU cores available
-		if torch.cuda.device_count() > 1:
-			netD = nn.DataParallel(netD)
-			netG = nn.DataParallel(netG)
+		#if torch.cuda.device_count() > 1:
+		#netD = nn.DataParallel(netD)
+		#netG = nn.DataParallel(netG)
 		netD.to(device)
 		netG.to(device)
 		
-
-		comm_size = self.world_size()
+		comm_size = self.world_size
 
 		#reset the batch size based on the number of processes used
 		self.batch_size = self.batch_size // comm_size
 		
 		rank = dist.get_rank()
 		partition = self.partition[rank]
+		#print(partition)
+		
 		ds = NETCDFDataPartition(partition, self.data_dir)
 				
 		#Specify that we are loading training set
@@ -127,10 +122,13 @@ class Trainer:
 		dl_iter = iter(dl)
 	
 
-		
+		loss_n_updates = 0
+		report_step = 0
 		#Training loop
-		n_updates = 1
 		for current_epoch in range(1, self.num_epoch + 1):		
+			n_updates = 1
+			D_epoch_loss = G_epoch_loss = 0
+
 			while True:
 				#sample batch
 				try:
@@ -138,22 +136,38 @@ class Trainer:
 				except StopIteration:
 					#end of epoch -> shuffle dataset and reinitialize iterator
 					sampler.permute()
-					logging.info("Shuffling batches")
 					dl_iter = iter(dl)
 					#start new epoch
 					break
 		
+				#report avg_loss per epoch
+				if loss_n_updates == report_avg_loss:
+					D_epoch_loss = torch.tensor(D_epoch_loss).to(device)
+					G_epoch_loss = torch.tensor(G_epoch_loss).to(device)
+					all_reduce_dist([D_epoch_loss])
+					all_reduce_dist([G_epoch_loss])									
+					D_avg_epoch_loss = D_epoch_loss / loss_n_updates
+					G_avg_epoch_loss = G_epoch_loss / loss_n_updates
+					self._run.log_scalar('D_avg_epoch_loss', D_avg_epoch_loss.item(), report_step)
+					self._run.log_scalar('G_avg_epoch_loss', G_avg_epoch_loss.item(), report_step)
+					loss_n_updates = 0
+					report_step += 1
+					D_epoch_loss = G_epoch_loss = 0
+					
 				#unwrap the batch			
 				current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
 				
 				if self.label_smoothing:
 					ts = np.full((self.batch_size), 0.9)
-					real_labels = ut.to_variable(torch.FloatTensor(ts), device, requires_grad = False)
+					real_labels = ut.to_variable(torch.FloatTensor(ts), requires_grad = False)
 				else:
-					real_labels = ut.to_variable(torch.FloatTensor(np.ones(self.batch_size, dtype=int)), device, requires_grad = False)
+					real_labels = ut.to_variable(torch.FloatTensor(np.ones(self.batch_size, dtype=int)),requires_grad = False)
 									
-				fake_labels = ut.to_variable(torch.FloatTensor(np.zeros(self.batch_size, dtype = int)), device,requires_grad = False)
-
+				fake_labels = ut.to_variable(torch.FloatTensor(np.zeros(self.batch_size, dtype = int)), requires_grad = False)
+				
+				real_labels = real_labels.to(device)
+				fake_labels = fake_labels.to(device)
+				
 				#ship tensors to devices
 				current_month = current_month.to(device)
 				avg_context = avg_context.to(device)
@@ -161,6 +175,7 @@ class Trainer:
 				
 				#sample noise
 				z = ds.get_noise(self.z_shape, self.batch_size)
+				z = z.to(device)
 				
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 				if n_updates % 2 == 1:
@@ -189,7 +204,11 @@ class Trainer:
 				
 					#1B. Train D on fake
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
+					#high_res_for_G = high_res_for_G.to(device)
+					#avg_ctxt_for_G = avg_ctxt_for_G.to(device)
+					
 					fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
+					
 					if self.add_noise:
 						fake_inputs = self.noise(fake_inputs)
 					
@@ -221,6 +240,8 @@ class Trainer:
 					
 					#Add the gradients from the all-real and all-fake batches	
 					d_loss = d_real_loss + d_fake_loss
+					D_epoch_loss += d_loss.item()
+					
 					#report d_loss
 					self._run.log_scalar('d_loss', d_loss.item(), n_updates)
 					
@@ -235,7 +256,7 @@ class Trainer:
 						idx = perm[:half]
 						samples_to_buffer = fake_input_with_ctxt[idx]
 						
-						if n_updates == 1:
+						if n_updates == 1 and current_epoch == 1:
 							#initialize experience replay
 							self.replay_buffer = samples_to_buffer
 						else:
@@ -271,36 +292,58 @@ class Trainer:
 					#update weights of G				
 					g_optim.step()
 					
+					G_epoch_loss += g_loss
 					logging.info("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
 					self._run.log_scalar('g_loss', g_loss.item(), n_updates)
 					
 				n_updates += 1	
-
+				loss_n_updates += 1
 
 def average_gradients(model):
 	size = float(dist.get_world_size())
-	for param in modell.parameters():
+	for param in model.parameters():
 		dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
 		param.grad.data /= size
+
+def all_reduce_dist(sums):
+	for sum in sums:
+		dist.all_reduce(sum, op=dist.ReduceOp.SUM)
+
 	
 
 @ex.main
 def main(_run):
-
 	t = Trainer()
-	t.run()
+	t.run()	
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
+	
 	parser.add_argument('--local_rank', type=int)
+	parser.add_argument('--num_epoch', type=int)
+	parser.add_argument('--batch_size', type=int)
+	parser.add_argument('--data_dir', type=str)
+	parser.add_argument('--report_loss', type=int)	
+
 	args = parser.parse_args()
 	lrank = args.local_rank
+	num_epoch = args.num_epoch
+	batch_size = args.batch_size
+	data_dir = args.data_dir
+	report_avg_loss = args.report_loss	
+
 	print(f'localrank: {lrank}	host: {os.uname()[1]}')
 
 
 	torch.cuda.set_device(lrank)
 	dist.init_process_group('nccl', 'env://')
 	
+
+	ex.add_config(
+		num_epoch=num_epoch,
+		batch_size=batch_size,
+		data_dir=data_dir,
+		report_avg_loss=report_avg_loss)
 	
+	ex.run()
