@@ -7,6 +7,8 @@ import random
 from Constants import clmt_vars, scenarios, realizations
 from torch.utils import data
 from torch.distributions.multivariate_normal import MultivariateNormal
+import logging as log
+
 
 #default params
 lat = 128

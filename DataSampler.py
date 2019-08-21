@@ -63,13 +63,9 @@ class DataSampler(Sampler):
 		#permute indices within a file
 		log.info("Permuting indices in each file")
 		for i in range(len(files)):
-			files[i] = np.random.permutation(files[i])
+			self.file_indices[i] = np.random.permutation(self.file_indices[i])
 		
 
-		#permute an order of files
-		log.info("permute order of files")
-		files = np.random.permutation(files)
-		
 
 	def __iter__(self):
 		"""
@@ -78,17 +74,17 @@ class DataSampler(Sampler):
 		n_files = self.n_files
 		file_indices = self.file_indices
 		
-		#i is a file in the partition, [i][j] is the index in the file
-		for i in range(len(file_indices)):
-			return ((i, file_indices[i][j]) for j in range(len(file_indices[i])))
-			
-		#return (self.indices[i] for i in range(len(self.indices)))
+		for i in range(n_files):
+			file = file_indices[i]
+			for j in range(len(file)):
+				yield (i, file[j])	
 				
 
 	def __len__(self):
 		"""
 		Get the length of all the valid indices
 		"""
-		#return len(self.indices)
+		
+
 		return self.total_len
 		

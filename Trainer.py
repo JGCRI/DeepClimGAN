@@ -22,7 +22,7 @@ import torch.distributed as dist
 import argparse
 import logging
 
-ex = Experiment('First experiment with distributed training')
+ex = Experiment('Experiment 15, with experience replay, with noise')
 
 
 #MongoDB
@@ -42,8 +42,8 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = False
-	experience_replay = False
+	add_noise = True
+	experience_replay = True
 	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
@@ -55,7 +55,6 @@ class Trainer:
 		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
-		
 		#buffer for expereince replay		
 		self.replay_buffer = []
 		self.sorted_files = sort_files_by_size(self.data_dir)
@@ -97,10 +96,6 @@ class Trainer:
 		
 		device = torch.cuda.current_device()
 
-		#use all possible GPU cores available
-		#if torch.cuda.device_count() > 1:
-		#netD = nn.DataParallel(netD)
-		#netG = nn.DataParallel(netG)
 		netD.to(device)
 		netG.to(device)
 		
@@ -108,10 +103,11 @@ class Trainer:
 
 		#reset the batch size based on the number of processes used
 		self.batch_size = self.batch_size // comm_size
-		
+		self.replay_buffer_size = 20 * self.batch_size
+
+
 		rank = dist.get_rank()
 		partition = self.partition[rank]
-		#print(partition)
 		
 		ds = NETCDFDataPartition(partition, self.data_dir)
 				
@@ -182,8 +178,9 @@ class Trainer:
 					#save gradients for D
 					d_grad = ut.save_grads(netD, "Discriminator")
 					self._run.log_scalar('D_grads', d_grad, n_updates)
+
+	
 					netD.zero_grad()
-					
 					#concatenate context with the input to feed D
 					if self.add_noise:
 						self.noise = GaussianNoise(device)
@@ -197,8 +194,9 @@ class Trainer:
 					d_real_loss.backward()
 
 					#average gradients
-					average_gradients(netD)
-						
+					#average_gradients(netD)
+					
+	
 					#report d_real_loss
 					self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates)
 				
@@ -215,17 +213,18 @@ class Trainer:
 					fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
 											
 					#feed fake input augmented with the context to D
-					if self.experience_replay and n_updates > 1:
-						perm = torch.randperm(self.replay_buffer.size(0))
-						half = self.batch_size // 2
-						buffer_idx = perm[:half]
-						samples_from_buffer = self.replay_buffer[buffer_idx]
-						perm = torch.randperm(fake_input_with_ctxt.size(0))
-						fake_idx = perm[:half]
-						samples_from_G = fake_input_with_ctxt[fake_idx]
-						D_input = torch.cat((samples_from_buffer, samples_from_G), dim=0)
-					else:
-						D_input = fake_input_with_ctxt
+					if self.experience_replay:
+						if current_epoch == 1 and n_updates == 1:
+							D_input = fake_input_with_ctxt
+						else:
+							perm = torch.randperm(self.replay_buffer.shape[0])
+							half = self.batch_size // 2
+							buffer_idx = perm[:half]
+							samples_from_buffer = self.replay_buffer[buffer_idx].to(device)
+							perm = torch.randperm(fake_input_with_ctxt.shape[0])
+							fake_idx = perm[:half]
+							samples_from_G = fake_input_with_ctxt[fake_idx]
+							D_input = torch.cat((samples_from_buffer, samples_from_G), dim=0)
 							
 					outputs = netD(D_input.detach()).squeeze()
 					
@@ -251,10 +250,10 @@ class Trainer:
 					#Update experience replay
 					if self.experience_replay:
 						#save random 1/2 of batch of generated data
-						perm = torch.randperm(fake_input_with_ctxt.size(0))
+						perm = torch.randperm(fake_input_with_ctxt.shape[0])
 						half = self.batch_size // 2
 						idx = perm[:half]
-						samples_to_buffer = fake_input_with_ctxt[idx]
+						samples_to_buffer = fake_input_with_ctxt[idx].detach().cpu()
 						
 						if n_updates == 1 and current_epoch == 1:
 							#initialize experience replay
@@ -264,13 +263,15 @@ class Trainer:
 							#replace  1/2 of batch size from the buffer with the newly \
 							#generated data
 							if self.replay_buffer.shape[0] == self.replay_buffer_size:
-								perm = torch.randperm(self.replay_buffer.size(0))
+								#replace by new generated data
+								perm = torch.randperm(self.replay_buffer.shape[0])
 								idx = perm[:half]
 								self.replay_buffer[idx] = samples_to_buffer
-							else:
+							else:	
+								#add new data
 								self.replay_buffer = torch.cat((self.replay_buffer, samples_to_buffer),dim=0) 
 				
-					logging.info("epoch {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
+					logging.info("epoch {}, rank {}, update {}, d loss = {:0.18f}, d real = {:0.18f}, d fake = {:0.18f}".format(current_epoch, rank, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
 				else:
 				
 					#2. Train Generator on D's response: maximize log(D(G(z))
@@ -293,7 +294,7 @@ class Trainer:
 					g_optim.step()
 					
 					G_epoch_loss += g_loss
-					logging.info("epoch {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, n_updates, g_loss.item()))
+					logging.info("epoch {}, rank {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, rank, n_updates, g_loss.item()))
 					self._run.log_scalar('g_loss', g_loss.item(), n_updates)
 					
 				n_updates += 1	

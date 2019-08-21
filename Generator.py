@@ -8,11 +8,13 @@ from Constants import clmt_vars
 """
 reference: https://github.com/batsa003/videogan/blob/master/model.py
 """
+
 n_channels = len(clmt_vars)
 
 class Generator(nn.Module):
 	def __init__(self, h, w, t, ch, batch_size):
 		super(Generator, self).__init__()
+		
 		self.pool = pool2d()
 		self.relu = relu()
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
@@ -44,7 +46,7 @@ class Generator(nn.Module):
 		#block 6
 		self.upconv6 = upconv3d_same(init_ctxt_channel_size+2+32, n_channels)
 
-		#convolutions for the contextx
+		#convolutions for the context
 		self.init1 = conv2d(init_ctxt_channel_size, 8)				
 		self.conv2_4 = conv2d(2, 4)
 		self.conv4_8 = conv2d(4, 8)
@@ -116,6 +118,9 @@ class Generator(nn.Module):
 		avg5 = avg_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, init5, avg5],dim=1)
 		x = self.relu(self.batchNorm5d_5(x))
+		
+		#block 6
 		out = self.upconv6(x)
+
 		return out
 
