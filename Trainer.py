@@ -42,8 +42,8 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = True
-	experience_replay = True
+	add_noise = False
+	experience_replay = False
 	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
@@ -52,7 +52,7 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss  = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
 		#buffer for expereince replay		
@@ -66,8 +66,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save
 	
 	@ex.capture
 	def get_exp_info(self, _run):
@@ -104,8 +104,11 @@ class Trainer:
 		#reset the batch size based on the number of processes used
 		self.batch_size = self.batch_size // comm_size
 		self.replay_buffer_size = 20 * self.batch_size
-
-
+		n_data_to_save_on_process = self.n_data_to_save // comm_size #should be on CPU
+		real_data_saved = []
+		gen_data_saved = []
+		
+		
 		rank = dist.get_rank()
 		partition = self.partition[rank]
 		
@@ -120,9 +123,13 @@ class Trainer:
 
 		loss_n_updates = 0
 		report_step = 0
+
+		n_real_saved = n_gen_saved = 0
+		
 		#Training loop
 		for current_epoch in range(1, self.num_epoch + 1):		
 			n_updates = 1
+			
 			D_epoch_loss = G_epoch_loss = 0
 
 			while True:
@@ -194,9 +201,19 @@ class Trainer:
 					d_real_loss.backward()
 
 					#average gradients
-					#average_gradients(netD)
+					average_gradients(netD)
 					
-	
+					#save data to calculate statistics
+					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save:
+						cpu_dev = torch.device("cpu")
+						current_month.to(cpu_dev)
+						real_data_saved.append(current_month)
+						current_month.to(device)
+						n_real_saved += self.batch_size
+						if n_real_saved >= n_data_to_save:
+							save_data(real_data_saved, self.real_data_dir, rank)
+					
+						
 					#report d_real_loss
 					self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates)
 				
@@ -207,10 +224,21 @@ class Trainer:
 					
 					fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 					
+					#save data to calculate statistics
+					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save:
+						cpu_dev = torch.device("cpu")
+						fake_inputs = fake_inputs.to(cpu_dev)
+						gen_data_saved.append(fake_inputs)
+						fake_inputs.to(device)
+						n_gen_saved += self.batch_size
+						if n_gen_saved >= n_data_to_save:
+							save_data(gen_data_saved, self.gen_data_dir, rank)
+					
 					if self.add_noise:
 						fake_inputs = self.noise(fake_inputs)
 					
 					fake_input_with_ctxt = ds.build_input_for_D(fake_inputs, avg_context, high_res_context)
+					D_input = fake_input_with_ctxt
 											
 					#feed fake input augmented with the context to D
 					if self.experience_replay:
@@ -225,7 +253,7 @@ class Trainer:
 							fake_idx = perm[:half]
 							samples_from_G = fake_input_with_ctxt[fake_idx]
 							D_input = torch.cat((samples_from_buffer, samples_from_G), dim=0)
-							
+								
 					outputs = netD(D_input.detach()).squeeze()
 					
 					d_fake_loss = loss_func(outputs, fake_labels)
@@ -287,6 +315,16 @@ class Trainer:
 					g_loss = loss_func(outputs, real_labels)#compute loss for G
 					g_loss.backward()
 					
+					#save generated data
+					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save:
+						cpu_dev = torch.device("cpu")
+						g_outputs_fake.to(cpu_dev)
+						gen_data_saved.append(g_outputs_fake)
+						g_outputs_fake.to(device)
+						n_gen_saved += self.batch_size
+						if n_gen_saved >= n_data_to_save:
+							save_data(gen_data_saved, self.gen_data_dir, rank)
+					
 					#average gradients
 					average_gradients(netG)
 				
@@ -310,7 +348,23 @@ def all_reduce_dist(sums):
 	for sum in sums:
 		dist.all_reduce(sum, op=dist.ReduceOp.SUM)
 
+
+#save_data(gen_data_saved, self.gen_data_dir, process_rank)
+#save_data(real_data_saved, self.real_data_dir, process_rank)
+
 	
+def save_data(months_to_save, save_dir, process_rank):
+	
+	tensor = torch.stack(months_to_save, dim=0)
+	ts_name = os.path.join(save_dir, str(process_rank))
+	torch.save(tensor, ts_name + ".pt")
+	return 
+
+def denormalize(tensor):
+	pass
+	
+
+
 
 @ex.main
 def main(_run):
@@ -326,17 +380,24 @@ if __name__ == "__main__":
 	parser.add_argument('--batch_size', type=int)
 	parser.add_argument('--data_dir', type=str)
 	parser.add_argument('--report_loss', type=int)	
-
+	parser.add_argument('--gen_data_dir',type=str)
+	parser.add_argument('--real_data_dir', type=str)
+	parser.add_argument('--save_gen_data_update',type=int)
+	parser.add_argument('--n_data_to_save', type=int)
+	
 	args = parser.parse_args()
+
 	lrank = args.local_rank
 	num_epoch = args.num_epoch
 	batch_size = args.batch_size
 	data_dir = args.data_dir
 	report_avg_loss = args.report_loss	
-
+	gen_data_dir = args.gen_data_dir
+	real_data_dir = args.real_data_dir
+	save_gen_data_update = args.save_gen_data_update
+	n_data_to_save = args.n_data_to_save
+	
 	print(f'localrank: {lrank}	host: {os.uname()[1]}')
-
-
 	torch.cuda.set_device(lrank)
 	dist.init_process_group('nccl', 'env://')
 	
@@ -345,6 +406,10 @@ if __name__ == "__main__":
 		num_epoch=num_epoch,
 		batch_size=batch_size,
 		data_dir=data_dir,
-		report_avg_loss=report_avg_loss)
+		report_avg_loss=report_avg_loss,
+		gen_data_dir=gen_data_dir,
+		real_data_dir=real_data_dir,
+		save_gen_data_update=save_gen_data_update,
+		n_data_to_save=n_data_to_save)
 	
 	ex.run()
