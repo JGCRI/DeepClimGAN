@@ -22,7 +22,7 @@ import torch.distributed as dist
 import argparse
 import logging
 
-ex = Experiment('Experiment 15, with experience replay, with noise')
+ex = Experiment('Experiment 16, with experience replay, with noise')
 
 
 #MongoDB
@@ -42,8 +42,8 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = False
-	experience_replay = False
+	add_noise = True
+	experience_replay = True
 	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
@@ -90,12 +90,14 @@ class Trainer:
 		loss_func = torch.nn.BCELoss()
 		if self.label_smoothing:
 			loss_func = torch.nn.KLDivLoss()
+		
 		d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.5, 0.999])
 		g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.5, 0.999])
 				
 		
 		device = torch.cuda.current_device()
-
+		cpu_dev = torch.device("cpu")
+		
 		netD.to(device)
 		netG.to(device)
 		
@@ -105,9 +107,8 @@ class Trainer:
 		self.batch_size = self.batch_size // comm_size
 		self.replay_buffer_size = 20 * self.batch_size
 		n_data_to_save_on_process = self.n_data_to_save // comm_size #should be on CPU
-		real_data_saved = []
-		gen_data_saved = []
 		
+		real_data_saved, gen_data_saved = [], []		
 		
 		rank = dist.get_rank()
 		partition = self.partition[rank]
@@ -121,16 +122,14 @@ class Trainer:
 		dl_iter = iter(dl)
 	
 
-		loss_n_updates = 0
-		report_step = 0
-
-		n_real_saved = n_gen_saved = 0
+		loss_n_updates, report_step = 0, 0
+		n_real_saved, n_gen_saved = 0, 0
 		
 		#Training loop
 		for current_epoch in range(1, self.num_epoch + 1):		
 			n_updates = 1
 			
-			D_epoch_loss = G_epoch_loss = 0
+			D_epoch_loss, G_epoch_loss = 0, 0
 
 			while True:
 				#sample batch
@@ -155,7 +154,7 @@ class Trainer:
 					self._run.log_scalar('G_avg_epoch_loss', G_avg_epoch_loss.item(), report_step)
 					loss_n_updates = 0
 					report_step += 1
-					D_epoch_loss = G_epoch_loss = 0
+					D_epoch_loss, G_epoch_loss = 0, 0
 					
 				#unwrap the batch			
 				current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
@@ -198,20 +197,17 @@ class Trainer:
 					#1A. Train D on real
 					outputs = netD(input).squeeze()
 					d_real_loss = loss_func(outputs, real_labels)
-					d_real_loss.backward()
-
-					#average gradients
-					average_gradients(netD)
 					
 					#save data to calculate statistics
-					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save:
-						cpu_dev = torch.device("cpu")
-						current_month.to(cpu_dev)
+					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
+						current_month = current_month.to(cpu_dev)
 						real_data_saved.append(current_month)
-						current_month.to(device)
+						current_month = current_month.to(device)
 						n_real_saved += self.batch_size
-						if n_real_saved >= n_data_to_save:
+						if n_real_saved >= n_data_to_save_on_process:
 							save_data(real_data_saved, self.real_data_dir, rank)
+						#free buffer
+						real_data_saved = []
 					
 						
 					#report d_real_loss
@@ -219,21 +215,21 @@ class Trainer:
 				
 					#1B. Train D on fake
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
-					#high_res_for_G = high_res_for_G.to(device)
-					#avg_ctxt_for_G = avg_ctxt_for_G.to(device)
 					
 					fake_inputs = netG(z, avg_ctxt_for_G, high_res_for_G)
 					
 					#save data to calculate statistics
-					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save:
-						cpu_dev = torch.device("cpu")
+					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
 						fake_inputs = fake_inputs.to(cpu_dev)
 						gen_data_saved.append(fake_inputs)
-						fake_inputs.to(device)
+						fake_inputs = fake_inputs.to(device)
 						n_gen_saved += self.batch_size
-						if n_gen_saved >= n_data_to_save:
+						if n_gen_saved >= n_data_to_save_on_process:
 							save_data(gen_data_saved, self.gen_data_dir, rank)
-					
+						#free buffer
+						gen_data_saved = []
+						
+						
 					if self.add_noise:
 						fake_inputs = self.noise(fake_inputs)
 					
@@ -257,10 +253,6 @@ class Trainer:
 					outputs = netD(D_input.detach()).squeeze()
 					
 					d_fake_loss = loss_func(outputs, fake_labels)
-					d_fake_loss.backward()
-					
-					#average gradients
-					average_gradients(netD)
 					
 					#report d_fake_loss
 					self._run.log_scalar('d_fake_loss', d_fake_loss.item(), n_updates)
@@ -268,6 +260,11 @@ class Trainer:
 					#Add the gradients from the all-real and all-fake batches	
 					d_loss = d_real_loss + d_fake_loss
 					D_epoch_loss += d_loss.item()
+					
+					d_loss.backward()
+					
+					#AVERAGE_GRADIENTS
+					average_gradients(netD)
 					
 					#report d_loss
 					self._run.log_scalar('d_loss', d_loss.item(), n_updates)
@@ -316,15 +313,17 @@ class Trainer:
 					g_loss.backward()
 					
 					#save generated data
-					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save:
-						cpu_dev = torch.device("cpu")
-						g_outputs_fake.to(cpu_dev)
+					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
+						g_outputs_fake = g_outputs_fake.to(cpu_dev)
 						gen_data_saved.append(g_outputs_fake)
-						g_outputs_fake.to(device)
+						g_outputs_fake = g_outputs_fake.to(device)
 						n_gen_saved += self.batch_size
-						if n_gen_saved >= n_data_to_save:
+						if n_gen_saved >= n_data_to_save_on_process:
 							save_data(gen_data_saved, self.gen_data_dir, rank)
-					
+						
+						#free buffer
+						gen_data_saved = []
+						
 					#average gradients
 					average_gradients(netG)
 				
@@ -349,16 +348,22 @@ def all_reduce_dist(sums):
 		dist.all_reduce(sum, op=dist.ReduceOp.SUM)
 
 
-#save_data(gen_data_saved, self.gen_data_dir, process_rank)
-#save_data(real_data_saved, self.real_data_dir, process_rank)
-
 	
 def save_data(months_to_save, save_dir, process_rank):
+	#Tensor shape is batch_size x 7 x 128 x 256 x 32
+	 
+	logging.info("Saving data to {}".format(save_dir))
 	
-	tensor = torch.stack(months_to_save, dim=0)
+	batch_size = months_to_save[0].shape[0]
+	n_channels = months_to_save[0].shape[1]
+	n_months = len(months_to_save)
+	tensor = torch.cat(months_to_save, dim=0)#resulting tensor is batch_size*n_months x 7 x 128 x 256 x 32
+	tensor = tensor.view(n_channels, 128, 256, 32 * batch_size * n_months)
 	ts_name = os.path.join(save_dir, str(process_rank))
 	torch.save(tensor, ts_name + ".pt")
-	return 
+	
+	logging.info("Data is saved to {}".format(save_dir))
+
 
 def denormalize(tensor):
 	pass
