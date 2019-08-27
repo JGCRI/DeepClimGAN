@@ -52,7 +52,7 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save  = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		self.noise = None
 		#buffer for expereince replay		
@@ -66,8 +66,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir
 	
 	@ex.capture
 	def get_exp_info(self, _run):
@@ -121,6 +121,9 @@ class Trainer:
 		dl = data.DataLoader(ds, batch_sampler=b_sampler)
 		dl_iter = iter(dl)
 	
+		#Normalizer
+		nrm = Normalizer()
+		nrm.load_means_and_stds(self.norms_dir)
 
 		loss_n_updates, report_step = 0, 0
 		n_real_saved, n_gen_saved = 0, 0
@@ -201,6 +204,7 @@ class Trainer:
 					#save data to calculate statistics
 					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
 						current_month = current_month.to(cpu_dev)
+						nrm.denormalize(current_month)		
 						real_data_saved.append(current_month)
 						current_month = current_month.to(device)
 						n_real_saved += self.batch_size
@@ -221,6 +225,7 @@ class Trainer:
 					#save data to calculate statistics
 					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
 						fake_inputs = fake_inputs.to(cpu_dev)
+						nrm.denormalize(fake_inputs)
 						gen_data_saved.append(fake_inputs)
 						fake_inputs = fake_inputs.to(device)
 						n_gen_saved += self.batch_size
@@ -315,6 +320,7 @@ class Trainer:
 					#save generated data
 					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
 						g_outputs_fake = g_outputs_fake.to(cpu_dev)
+						nrm.denormalize(g_outputs_fake)
 						gen_data_saved.append(g_outputs_fake)
 						g_outputs_fake = g_outputs_fake.to(device)
 						n_gen_saved += self.batch_size
@@ -365,10 +371,6 @@ def save_data(months_to_save, save_dir, process_rank):
 	logging.info("Data is saved to {}".format(save_dir))
 
 
-def denormalize(tensor):
-	pass
-	
-
 
 
 @ex.main
@@ -389,6 +391,7 @@ if __name__ == "__main__":
 	parser.add_argument('--real_data_dir', type=str)
 	parser.add_argument('--save_gen_data_update',type=int)
 	parser.add_argument('--n_data_to_save', type=int)
+	parser.add_argument('--norms_dir', type=str)
 	
 	args = parser.parse_args()
 
@@ -401,6 +404,7 @@ if __name__ == "__main__":
 	real_data_dir = args.real_data_dir
 	save_gen_data_update = args.save_gen_data_update
 	n_data_to_save = args.n_data_to_save
+	norms_dir = args.norms_dir
 	
 	print(f'localrank: {lrank}	host: {os.uname()[1]}')
 	torch.cuda.set_device(lrank)
@@ -415,6 +419,7 @@ if __name__ == "__main__":
 		gen_data_dir=gen_data_dir,
 		real_data_dir=real_data_dir,
 		save_gen_data_update=save_gen_data_update,
-		n_data_to_save=n_data_to_save)
+		n_data_to_save=n_data_to_save, 
+		norms_dir=norms_dir)
 	
 	ex.run()

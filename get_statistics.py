@@ -8,13 +8,13 @@ import os
 import torch
 import logging
 import csv
-
+from Normalizer import Normalizer
 
 #N_DAYS = 0
 N_CELLS = len(grid_cells_for_stat)
 
 
-def process_tensors(data_path):
+def process_tensors(data_path, nrm):
 
 	clmt_var_keys = list(clmt_vars.keys())
 
@@ -27,7 +27,7 @@ def process_tensors(data_path):
 		ts_name = os.path.join(data_path, filename)
 		tsr = torch.load(ts_name)
 		tsr = tsr.detach()
-		
+		nrm.denormalize(tsr)
 		
 		pr_tsrs.append(tsr[clmt_var_keys.index('pr')])
 		tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
@@ -37,7 +37,6 @@ def process_tensors(data_path):
 		rhsmax_tsrs.append(tsr[clmt_var_keys.index('rhsmax')])
 		rhs_tsrs.append(tsr[clmt_var_keys.index('rhs')])
 
-	
 	return (pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs, rhs_tsrs, rhsmin_tsrs, rhsmax_tsrs)
 
 
@@ -46,16 +45,16 @@ def merge_tensors(tsrs):
 
 	pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs, rhs_tsrs, rhsmin_tsrs, rhsmax_tsrs = tsrs
 	
- 	pr_tsr = torch.cat(pr_tsrs, dim=2)
-        tas_tsr = torch.cat(tas_tsrs, dim=2)
-        tasmin_tsr = torch.cat(tasmin_tsrs, dim=2)
-        tasmax_tsr = torch.cat(tasmax_tsrs, dim=2)
-        rhs_tsr = torch.cat(rhs_tsrs, dim=2)
-        rhsmin_tsr = torch.cat(rhsmin_tsrs, dim=2)
-        rhsmax_tsr = torch.cat(rhsmax_tsrs, dim=2)
-        N_DAYS = pr_tsr.shape[-1]
+	pr_tsr = torch.cat(pr_tsrs, dim=2)
+	tas_tsr = torch.cat(tas_tsrs, dim=2)
+	tasmin_tsr = torch.cat(tasmin_tsrs, dim=2)
+	tasmax_tsr = torch.cat(tasmax_tsrs, dim=2)
+	rhs_tsr = torch.cat(rhs_tsrs, dim=2)
+	rhsmin_tsr = torch.cat(rhsmin_tsrs, dim=2)
+	rhsmax_tsr = torch.cat(rhsmax_tsrs, dim=2)
+	N_DAYS = pr_tsr.shape[-1]
 
-        return pr_tsr, tas_tsr, tasmin_tsr, tasmax_tsr, rhs_tsr, rhsmin_tsr, rhsmax_tsr
+	return pr_tsr, tas_tsr, tasmin_tsr, tasmax_tsr, rhs_tsr, rhsmin_tsr, rhsmax_tsr
 
 
 def get_tas_stat(tas_tsr):
@@ -65,14 +64,16 @@ def get_tas_stat(tas_tsr):
 	 sd/variance
 	 p-value for Shapiro-Wilk
 	"""
+	
 	N_DAYS = tas_tsr.shape[-1]
 	dic = [[0 for _ in range(3)] for _ in range(N_CELLS)]
+	tas_tsr = np.asarray(tas_tsr)
 	
 	for i, (cell, val) in enumerate(grid_cells_for_stat.items()):
 		lat, lon = val
 		tsr = tas_tsr[lat, lon]
-		mean = torch.mean(tsr)
-		std = torch.sqrt((tsr - mean) ** 2 / N_DAYS)
+		mean = np.mean(tsr)
+		std = np.sqrt((tsr - mean) ** 2 / N_DAYS)
 		tsr = np.asarray(tsr)
 		test_stat, p_value = stats.shapiro(tsr)
 		dic[i][:] = [mean, std, p_value]
@@ -147,10 +148,9 @@ def get_tas_min_max_stat(tas, tasmin, tasmax):
 	
 	tasmin_std = np.std(tasmin)
 	tasmax_std = np.std(tasmax)
+		
+	tas_fltr = tas_arr[(tas_arr >= tasmin) & (tas_arr <= tasmax)]
 	
-	
-	tas_fltr = tas_arr[tas_arr >= tasmin]
-	tas_fltr = tas_fltr[tas_fltr <= tasmax]
 	tas_is_in_range_fraq = len(tas_fltr) / N_DAYS
 	
 	return [tasmin_mean, tasmax_mean, tasmin_std, tasmax_std, tas_is_in_range_fraq]
@@ -217,12 +217,13 @@ def get_rhs_min_max_stat(rhs, rhsmin, rhsmax):
 	rhsmin_std = np.std(rhsmin)
 	rhsmax_std = np.std(rhsmax)
 
-	rhs_fltr = rhs_arr[rhs_arr >= rhsmin]
-	rhs_fltr = rhs_fltr[rhs_fltr <= rhsmax]
+	rhs_fltr = rhs_arr[(rhs_arr >= rhsmin) & (rhs_arr <= rhsmax)]
 	
 	rhs_is_in_range_fraq = len(rhs_fltr) / N_DAYS
 	
 	return [rhsmin_mean, rhsmax_mean, rhsmin_std, rhsmax_std, rhs_is_in_range_fraq]
+
+
 
 def get_dewpoint_stat_for_cells(rhs, tas):
 	
@@ -243,14 +244,19 @@ def calc_dewpoint(rhs, tas):
 	beta = float(17.62)
 	lambda_v = 243.12 + 273
 	
-	num = np.log(rhs / 100) + (beta * tas) / (lamda_v + tas)
+	rhs = np.asarray(rhs)
+	tas = np.asarray(tas)
+	num = np.log(rhs / 100) + (beta * tas) / (lambda_v + tas)
 	dp = lambda_v * num / (beta - num)
-	
 	return dp
 
 
 def get_dewpoint_stat(rhs, tas):
-	dp = calc_dewpoint(rhs, tas)
+	"""
+	Calculate statistics for dewpoint
+	"""
+	
+	dp = calc_dewpoint(rhs, tas)	
 	dp_min = np.min(dp)
 	dp_max = np.max(dp)
 	dp_mean = np.mean(dp)
@@ -264,9 +270,9 @@ def write_stats_to_csv(stats, fname, exp_id):
 	"""
 	precip, tas, tasmin/max, rhs, rhsmin/max
 	"""
-	fname = os.path.join(fname, str(exp_id) + "/stats.csv")
+	fname = os.path.join(fname, "exp_" + str(exp_id) + "/stats.csv")
 	with open(fname, mode='w') as of:
-		c_writer = csv.writer(of, delimeter=',')
+		c_writer = csv.writer(of, delimiter=',')
 		for stat in stats:
 			c_writer.writerow(stat)
 	
@@ -274,60 +280,91 @@ def write_stats_to_csv(stats, fname, exp_id):
 
 
 def write_to_csv_for_time_series(tsrs, path):
-	
+
+	tsrs = list(tsrs)
+	ts_ctr = 0
 	for tsr in tsrs:
-		ts_ctr = 0
-		ts_name = os.path.join(path, "ts" + str(ts_ctr) + ".csv")
+		ts_name = os.path.join(path, str(ts_ctr) + ".csv")
+		print(ts_name)
 		with open(ts_name, 'w') as of:
-			cv_writer = csv.writer(of, delimeter=',')
+			cv_writer = csv.writer(of, delimiter=',')
 			for i, (cell, val) in enumerate(grid_cells_for_stat.items()):
 				lat, lon = val
 				tensor = tsr[lat, lon]
 				arr = np.asarray(tensor)
 				cv_writer.writerow(arr)					
 				
-				
 		ts_ctr += 1
+
 
 def main():
 	
+
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--gen_data_dir', type=str)
 	parser.add_argument('--real_data_dir', type=str)
 	parser.add_argument('--gen_csv_dir', type=str)
 	parser.add_argument('--real_csv_path', type=str)
-	parser.add_argument('--save_stats_path', type=str)
+	parser.add_argument('--gen_stats_dir', type=str)
+	parser.add_argument('--real_stats_dir', type=str)
 	parser.add_argument('--exp_id', type=int)
-	
-
+	parser.add_argument('--real_csv_dir', type=str)
+	parser.add_argument('--norms_dir', type=str)
 	
 	args = parser.parse_args()
 
 	real_data_dir = args.real_data_dir
 	gen_data_dir = args.gen_data_dir
-	real_csv_path = args.real_csv_path
-	gen_csv_path = args.gen_csv_path
-	save_stats_path = args.save_stats_path
+	real_csv_dir = args.real_csv_dir
+	gen_csv_dir = args.gen_csv_dir
+	gen_stats_dir = args.gen_stats_dir
+	real_stats_dir = args.real_stats_dir
+	exp_id = args.exp_id
+	real_csv_dir = args.real_csv_dir	
+	norms_dir = args.norms_dir
+
+
+	nrm = Normalizer()
+	nrm.load_means_and_stds(norms_dir)
+
+	tsrs = process_tensors(gen_data_dir, nrm)
+	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
+
+
+	#real_tsrs = process_tensors(real_data_dir, nrm)
+	#pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
 	
 
-	tsrs = process_tensors(gen_data_dir)
-	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gan, rhsmax_gen = merge_tensors(tsrs)
 	
-	#pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_data_dir)
 	
-
-
-
-	tas_stats = get_tas_stat(tas_gen)
+	#Generated data stats
 	p_stat = get_p_stat_for_cells(pr_gen)
+	tas_stats = get_tas_stat(tas_gen)
 	tas_min_max_stat = get_tas_min_max_stat_for_cells(tas_gen, tasmin_gen, tasmax_gen)
 	rhs_stats = get_rhs_stat_for_cells(rhs_gen)
 	rhsmin_max = get_rhs_min_max_stat_for_cells(rhs_gen, rhsmin_gen, rhsmax_gen)
+	dewpoint = get_dewpoint_stat_for_cells(rhs_gen, tas_gen)
+	gen_stats = [p_stat, tas_stats, tas_min_max_stat, rhs_stats, rhsmin_max, dewpoint]
+	#write_stats_to_csv(stats, gen_stats_dir, exp_id)
+	
+	#save ptime series for precip from 4 processes
+	precip = tsrs[0][:4]
+	
+	write_to_csv_for_time_series(precip, gen_csv_dir)
 
-	stats = [p_stat, tas_stats, tas_min_max_stat, rhs_stats, rhsmin_max]
 
-	write_stats_to_csv(stats, save_stats_path, exp_id)
-	#write_to_csv_for_time_series(tsrs, gen_csv_path)
-		
+
+	"""
+	#Real data stats
+	p_stat_real = get_p_stat_for_cells(pr_real)
+	tas_stat_real = get_tas_stat(tas_real)
+	tas_min_max_stat_real = get_tas_min_max_stat_for_cells(tas_real, tasmin_real, tasmax_real)
+	rhs_stat_real = get_rhs_stat_for_cells(rhs_real)
+	rhsmin_max_real = get_rhs_min_max_stat_for_cells(rhs_real, rhsmin_real, rhsmax_real)
+	dewpoint_real = get_dewpoint_stat_for_cells(rhs_real, tas_real)
+	real_stats = [p_stat_real, tas_stat_real, tas_min_max_stat_real, rhs_stat_real, rhsmin_max_real, dewpoint_real]	
+	#write_stats_to_csv(real_stats, real_stats_dir, exp_id)
+	#write_to_csv_for_time_series(real_tsrs, real_csv_dir)
+	"""	
 
 main()

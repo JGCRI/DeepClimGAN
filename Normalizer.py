@@ -6,6 +6,7 @@ class Normalizer:
 	
 	def __init__(self):
 		self.clmt_stats = {}
+
 	
 	def log_normalize_channel(self, data):
 		"""
@@ -15,14 +16,16 @@ class Normalizer:
 		"""
 		x = np.log(1 + data)
 		return x
+
 	
 
 	def log_denormalize_channel(self, data):
 		"""
 		Log denormalize channel
 		"""
-		x = np.exp(tsr) - 1
+		x = np.exp(data) - 1
 		return x
+
 	
 	def standartize_channel(self, batch, clmt_var):
 		"""
@@ -34,6 +37,7 @@ class Normalizer:
 		std = self.clmt_stats[clmt_var][1]
 		return (batch - mean) / std
 	
+
 	def destandartize_channel(self, batch, clmt_var):
 		"""
 		Destandartizes batch of data across the dim
@@ -82,6 +86,7 @@ class Normalizer:
 		"""
 		Load means and stds
 		"""		
+
 		tas_mean, tas_std = torch.load(dir+'tas_mean.pt').item(), torch.load(dir+'tas_std.pt').item()
 		tasmin_mean, tasmin_std = torch.load(dir+'tasmin_mean.pt').item(), torch.load(dir+'tasmin_std.pt').item()
 		tasmax_mean, tasmax_std = torch.load(dir+'tasmax_mean.pt').item(), torch.load(dir+'tasmax_std.pt').item()
@@ -89,7 +94,17 @@ class Normalizer:
 		rhsmin_mean, rhsmin_std = torch.load(dir+'rhsmin_mean.pt').item(), torch.load(dir+'rhsmin_std.pt').item()
 		rhsmax_mean, rhsmax_std = torch.load(dir+'rhsmax_mean.pt').item(), torch.load(dir+'rhsmax_std.pt').item()
 
-		
+
+		"""
+		print(tas_mean, tas_std)
+		print(tasmin_mean, tasmin_std)
+		print(tasmax_mean, tasmax_std)
+		print(rhs_mean, rhs_std)
+		print(rhsmin_mean, rhsmin_std)
+		print(rhsmax_mean, rhsmax_std)
+		"""
+
+				
 		self.clmt_stats['tas'] = [tas_mean, tas_std]
 		self.clmt_stats['tasmin'] = [tasmin_mean, tasmin_std]
 		self.clmt_stats['tasmax'] = [tasmax_mean, tasmax_std]
