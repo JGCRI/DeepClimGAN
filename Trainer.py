@@ -21,8 +21,12 @@ from Utils import sort_files_by_size, snake_data_partition
 import torch.distributed as dist
 import argparse
 import logging
+import csv
 
-ex = Experiment('Experiment 16, with experience replay, with noise')
+
+exp_id = 17
+
+ex = Experiment('Experiment ' + str(exp_id) +', without experience replay, without noise')
 
 
 #MongoDB
@@ -42,8 +46,8 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = True
-	experience_replay = True
+	add_noise = False
+	experience_replay = False
 	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
@@ -122,12 +126,13 @@ class Trainer:
 		dl_iter = iter(dl)
 	
 		#Normalizer
-		nrm = Normalizer()
-		nrm.load_means_and_stds(self.norms_dir)
+		#nrm = Normalizer()
+		#nrm.load_means_and_stds(self.norms_dir)
 
 		loss_n_updates, report_step = 0, 0
 		n_real_saved, n_gen_saved = 0, 0
-		
+		dates_mapping = []
+			
 		#Training loop
 		for current_epoch in range(1, self.num_epoch + 1):		
 			n_updates = 1
@@ -160,7 +165,7 @@ class Trainer:
 					D_epoch_loss, G_epoch_loss = 0, 0
 					
 				#unwrap the batch			
-				current_month, avg_context, high_res_context = batch["curr_month"], batch["avg_ctxt"], batch["high_res"]
+				current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
 				
 				if self.label_smoothing:
 					ts = np.full((self.batch_size), 0.9)
@@ -201,17 +206,18 @@ class Trainer:
 					outputs = netD(input).squeeze()
 					d_real_loss = loss_func(outputs, real_labels)
 					
-					#save data to calculate statistics
+					#save real to calculate statistics
 					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
 						current_month = current_month.to(cpu_dev)
-						nrm.denormalize(current_month)		
 						real_data_saved.append(current_month)
 						current_month = current_month.to(device)
 						n_real_saved += self.batch_size
+						dates_mapping.append(year_month_date)
 						if n_real_saved >= n_data_to_save_on_process:
-							save_data(real_data_saved, self.real_data_dir, rank)
-						#free buffer
-						real_data_saved = []
+							save_data(real_data_saved, self.real_data_dir, rank, exp_id, dates_mapping)
+							#free buffer
+							real_data_saved = []
+							dates_mapping = []
 					
 						
 					#report d_real_loss
@@ -225,14 +231,13 @@ class Trainer:
 					#save data to calculate statistics
 					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
 						fake_inputs = fake_inputs.to(cpu_dev)
-						nrm.denormalize(fake_inputs)
 						gen_data_saved.append(fake_inputs)
 						fake_inputs = fake_inputs.to(device)
 						n_gen_saved += self.batch_size
 						if n_gen_saved >= n_data_to_save_on_process:
-							save_data(gen_data_saved, self.gen_data_dir, rank)
-						#free buffer
-						gen_data_saved = []
+							save_data(gen_data_saved, self.gen_data_dir, rank, exp_id, dates_mapping)
+							#free buffer
+							gen_data_saved = []
 						
 						
 					if self.add_noise:
@@ -320,16 +325,24 @@ class Trainer:
 					#save generated data
 					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
 						g_outputs_fake = g_outputs_fake.to(cpu_dev)
-						nrm.denormalize(g_outputs_fake)
 						gen_data_saved.append(g_outputs_fake)
 						g_outputs_fake = g_outputs_fake.to(device)
 						n_gen_saved += self.batch_size
+						dates_mapping.append(year_month_date)
 						if n_gen_saved >= n_data_to_save_on_process:
-							save_data(gen_data_saved, self.gen_data_dir, rank)
-						
-						#free buffer
-						gen_data_saved = []
-						
+							save_data(gen_data_saved, self.gen_data_dir, rank, exp_id, dates_mapping)
+							#free buffer
+							gen_data_saved = []
+					#save real data
+					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
+						current_month = current_month.to(cpu_dev)
+						real_data_saved.append(current_month)
+						n_real_saved += self.batch_size
+						dates_mapping.append(year_month_date)
+						if n_real_saved >= n_data_to_save_on_process:
+							save_data(real_data_saved, self.real_data_dir, rank, exp_id, dates_mapping)
+							real_data_saved = []
+					
 					#average gradients
 					average_gradients(netG)
 				
@@ -355,7 +368,7 @@ def all_reduce_dist(sums):
 
 
 	
-def save_data(months_to_save, save_dir, process_rank):
+def save_data(months_to_save, save_dir, process_rank, exp_id, dates_mapping):
 	#Tensor shape is batch_size x 7 x 128 x 256 x 32
 	 
 	logging.info("Saving data to {}".format(save_dir))
@@ -365,10 +378,19 @@ def save_data(months_to_save, save_dir, process_rank):
 	n_months = len(months_to_save)
 	tensor = torch.cat(months_to_save, dim=0)#resulting tensor is batch_size*n_months x 7 x 128 x 256 x 32
 	tensor = tensor.view(n_channels, 128, 256, 32 * batch_size * n_months)
-	ts_name = os.path.join(save_dir, str(process_rank))
+	ts_name = os.path.join(save_dir + "exp_" + str(exp_id) + "/", str(process_rank))
 	torch.save(tensor, ts_name + ".pt")
 	
 	logging.info("Data is saved to {}".format(save_dir))
+
+	#TODO save dates mapping
+	fname = os.path.join(save_dir + "exp_" + str(exp_id) + "/",process_rank + "_"" + dates_mapping.csv")
+	with open(fname, 'w+') as of:
+		csv_writer = csv.writer(of, delimiter=', ')
+		#write date line by line (each date consists of N months, where N = batch size per process)
+		for date in dates_mapping: 
+			csv_writer.writerow(date)
+	return
 
 
 

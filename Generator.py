@@ -17,6 +17,7 @@ class Generator(nn.Module):
 		
 		self.pool = pool2d()
 		self.relu = relu()
+		self.sigm = torch.nn.Sigmoid()
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
 			
 		#block 0
@@ -121,6 +122,13 @@ class Generator(nn.Module):
 		
 		#block 6
 		out = self.upconv6(x)
+		
+		#apply activation functions per channels: pr -> relu, rhs, rhsmin, rhsmax -> sigmoid
+		for i, (key, val) in enumerate(clmt_vars.items()):
+			if i == 0:
+				out[:,i] = self.relu(out[:,i].clone())
+			elif i == 4 or i == 5 or i == 6:
+				out[:,i] = self.sigm(out[:,i].clone())
 
 		return out
 

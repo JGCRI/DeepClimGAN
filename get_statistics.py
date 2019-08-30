@@ -10,7 +10,6 @@ import logging
 import csv
 from Normalizer import Normalizer
 
-#N_DAYS = 0
 N_CELLS = len(grid_cells_for_stat)
 
 
@@ -27,6 +26,8 @@ def process_tensors(data_path, nrm):
 		ts_name = os.path.join(data_path, filename)
 		tsr = torch.load(ts_name)
 		tsr = tsr.detach()
+		
+		#Denormalize tensor
 		nrm.denormalize(tsr)
 		
 		pr_tsrs.append(tsr[clmt_var_keys.index('pr')])
@@ -73,7 +74,7 @@ def get_tas_stat(tas_tsr):
 		lat, lon = val
 		tsr = tas_tsr[lat, lon]
 		mean = np.mean(tsr)
-		std = np.sqrt((tsr - mean) ** 2 / N_DAYS)
+		std = np.std(tsr)
 		tsr = np.asarray(tsr)
 		test_stat, p_value = stats.shapiro(tsr)
 		dic[i][:] = [mean, std, p_value]
@@ -238,6 +239,19 @@ def get_dewpoint_stat_for_cells(rhs, tas):
 	return dic
 
 
+def get_dewpoint_stat(rhs, tas):
+	"""
+	Calculate statistics for dewpoint
+	"""
+	
+	dp = calc_dewpoint(rhs, tas)	
+	dp_min = np.min(dp)
+	dp_max = np.max(dp)
+	dp_mean = np.mean(dp)
+	dp_std = np.std(dp)
+
+	return [dp_min, dp_max, dp_mean, dp_std]
+
 def calc_dewpoint(rhs, tas):
 	
 	alpha = float(6.112)
@@ -251,48 +265,37 @@ def calc_dewpoint(rhs, tas):
 	return dp
 
 
-def get_dewpoint_stat(rhs, tas):
-	"""
-	Calculate statistics for dewpoint
-	"""
-	
-	dp = calc_dewpoint(rhs, tas)	
-	dp_min = np.min(dp)
-	dp_max = np.max(dp)
-	dp_mean = np.mean(dp)
-	dp_std = np.std(dp)
-
-	return [dp, dp_min, dp_max, dp_mean, dp_std]
 
 
 
-def write_stats_to_csv(stats, fname, exp_id):
+
+def write_stats_to_csv(stats, fname, exp_id, type):
 	"""
 	precip, tas, tasmin/max, rhs, rhsmin/max
 	"""
-	fname = os.path.join(fname, "exp_" + str(exp_id) + "/stats.csv")
-	with open(fname, mode='w') as of:
+	fname = os.path.join(fname, "exp_" + str(exp_id) + "/" + type + "/stats.csv")
+	with open(fname, mode='w+', newline='') as of:
 		c_writer = csv.writer(of, delimiter=',')
 		for stat in stats:
 			c_writer.writerow(stat)
 	
-	return
 
 
-def write_to_csv_for_time_series(tsrs, path):
+
+
+def write_to_csv_for_time_series(tsrs, path, prefix):
 
 	tsrs = list(tsrs)
 	ts_ctr = 0
 	for tsr in tsrs:
-		ts_name = os.path.join(path, str(ts_ctr) + ".csv")
-		print(ts_name)
-		with open(ts_name, 'w') as of:
+		ts_name = os.path.join(path, prefix + "_" + str(ts_ctr) + ".csv")
+		with open(ts_name, 'w+') as of:
 			cv_writer = csv.writer(of, delimiter=',')
 			for i, (cell, val) in enumerate(grid_cells_for_stat.items()):
 				lat, lon = val
 				tensor = tsr[lat, lon]
 				arr = np.asarray(tensor)
-				cv_writer.writerow(arr)					
+				cv_writer.writerow(call + " " + arr)					
 				
 		ts_ctr += 1
 
@@ -305,37 +308,37 @@ def main():
 	parser.add_argument('--real_data_dir', type=str)
 	parser.add_argument('--gen_csv_dir', type=str)
 	parser.add_argument('--real_csv_path', type=str)
-	parser.add_argument('--gen_stats_dir', type=str)
-	parser.add_argument('--real_stats_dir', type=str)
+	parser.add_argument('--stats_dir', type=str)
 	parser.add_argument('--exp_id', type=int)
 	parser.add_argument('--real_csv_dir', type=str)
 	parser.add_argument('--norms_dir', type=str)
-	
+		
 	args = parser.parse_args()
 
 	real_data_dir = args.real_data_dir
 	gen_data_dir = args.gen_data_dir
 	real_csv_dir = args.real_csv_dir
 	gen_csv_dir = args.gen_csv_dir
-	gen_stats_dir = args.gen_stats_dir
-	real_stats_dir = args.real_stats_dir
+	stats_dir = args.stats_dir
 	exp_id = args.exp_id
 	real_csv_dir = args.real_csv_dir	
 	norms_dir = args.norms_dir
-
+	print(exp_id)
 
 	nrm = Normalizer()
 	nrm.load_means_and_stds(norms_dir)
+
 
 	tsrs = process_tensors(gen_data_dir, nrm)
 	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
 
 
-	#real_tsrs = process_tensors(real_data_dir, nrm)
-	#pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
-	
+	"""
+	real_tsrs = process_tensors(real_data_dir, nrm)
+	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
+	"""
 
-	
+
 	
 	#Generated data stats
 	p_stat = get_p_stat_for_cells(pr_gen)
@@ -345,16 +348,29 @@ def main():
 	rhsmin_max = get_rhs_min_max_stat_for_cells(rhs_gen, rhsmin_gen, rhsmax_gen)
 	dewpoint = get_dewpoint_stat_for_cells(rhs_gen, tas_gen)
 	gen_stats = [p_stat, tas_stats, tas_min_max_stat, rhs_stats, rhsmin_max, dewpoint]
-	#write_stats_to_csv(stats, gen_stats_dir, exp_id)
+	write_stats_to_csv(gen_stats, stats_dir, exp_id, "gen")
+		
+
+	"""	
+	#save ptime series for precip from 2 processes
+	precip_gen = tsrs[0][:5]
+	tas_gen = tsrs[1][:5]
+	tasmin_gen = tsrs[2][:5]
+	tasmax_gen = tsrs[3][:5]
+	rhs_gen = tsrs[4][:5]
+	rhsmin_gen = tsrs[5][:5]
+	rhsmax_gen = tsrs[6][:5]	
+
 	
-	#save ptime series for precip from 4 processes
-	precip = tsrs[0][:4]
+	write_to_csv_for_time_series(precip_gen, gen_csv_dir, "pr")
+	write_to_csv_for_time_series(tas_gen, gen_csv_dir, "tas")
+	write_to_csv_for_time_series(tasmin_gen, gen_csv_dir, "tasmin")
+	write_to_csv_for_time_series(tasmax_gen, gen_csv_dir, "tasmax")
+	write_to_csv_for_time_series(rhs_gen, gen_csv_dir, "rhs")
+	write_to_csv_for_time_series(rhsmin_gen, gen_csv_dir, "rhsmin")
+	write_to_csv_for_time_series(rhsmax_gen, gen_csv_dir, "rhsmax")
 	
-	write_to_csv_for_time_series(precip, gen_csv_dir)
 
-
-
-	"""
 	#Real data stats
 	p_stat_real = get_p_stat_for_cells(pr_real)
 	tas_stat_real = get_tas_stat(tas_real)
@@ -363,8 +379,23 @@ def main():
 	rhsmin_max_real = get_rhs_min_max_stat_for_cells(rhs_real, rhsmin_real, rhsmax_real)
 	dewpoint_real = get_dewpoint_stat_for_cells(rhs_real, tas_real)
 	real_stats = [p_stat_real, tas_stat_real, tas_min_max_stat_real, rhs_stat_real, rhsmin_max_real, dewpoint_real]	
-	#write_stats_to_csv(real_stats, real_stats_dir, exp_id)
-	#write_to_csv_for_time_series(real_tsrs, real_csv_dir)
-	"""	
+	#write_stats_to_csv(real_stats, stats_dir, exp_id, "real")
+	
 
+	precip_real = real_tsrs[0][:5]
+	tas_real = real_tsrs[1][:5]
+	tasmin_real = real_tsrs[2][:5]
+	tasmax_real = real_tsrs[3][:5]
+	rhs_real = real_tsrs[4][:5]
+	rhsmin_real = real_tsrs[5][:5]
+	rhsmax_real = real_tsrs[6][:5]
+	
+	write_to_csv_for_time_series(precip_real, greal_csv_dir, "pr")
+	write_to_csv_for_time_series(tas_real, real_csv_dir, "tas")
+	write_to_csv_for_time_series(tasmin_real, real_csv_dir, "tasmin")
+	write_to_csv_for_time_series(tasmax_real, real_csv_dir, "tasmax")
+	write_to_csv_for_time_series(rhs_real, real_csv_dir, "rhs")
+	write_to_csv_for_time_series(rhsmin_real, real_csv_dir, "rhsmin")
+	write_to_csv_for_time_series(rhsmax_real, real_csv_dir, "rhsmax")
+	"""
 main()

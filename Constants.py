@@ -9,7 +9,7 @@ grid_cells_for_stat = {
 	"ocean_low" : [71, 67],#Andaman Sea
 	"land_high" : [108,111],#Alaska
 	"land_mid" : [92, 55],#College park
-	"land_low" : [18, 78] #Sahara
+	"land_low" : [80, 35] #Sahara
 }
 
 
@@ -32,6 +32,21 @@ clmt_vars = {
 	'rhsmax' : [rhs_max_dir,'stand'],
 	'rhs' : [rhs_day_dir,'stand']
 }
+
+
+months = {
+	0 : "Jan",
+	1 : "Feb",
+	2 : "March",
+	3 : "Apr",
+	4 : "May",
+	5 : "Jun",
+	6 : "Jul",
+	7 : "Aug",
+	8 : "Sep",
+	9 : "Oct",
+	10 : "Nov",
+	11 : "Dec"}
 
 
 GB_to_B = 1073741824
