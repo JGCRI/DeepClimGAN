@@ -199,9 +199,9 @@ class Trainer:
 					logging.info("epoch {}, rank {}, update {}, g loss {:0.18f}".format(current_epoch, rank, n_updates, loss.item()))
 					average_gradients()
 					g_optim.step()
-					if loss.item() < min_loss:
-						min_loss = min(min_loss, loss.item())
-						save_model(netG, self.save_model_dir + str(exp_id))
+					#if loss.item() < min_loss:
+					#	min_loss = min(min_loss, loss.item())
+					#	save_model(netG, self.save_model_dir + str(exp_id))
 			
 				"""
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
@@ -406,7 +406,6 @@ def get_mean_map(batch, comm_size):
 	tsr = tsr.view(n_channels, 128,256,32 * bsz) #7 x 128 x 256 x bsz*32
 	#sum along days dimension
 	sum_tsr = tsr.sum(-1)
-	
 	all_reduce_sum(sum_tsr)
 	mean_tsr = sum_tsr / (bsz * 32 * comm_size)
 	return mean_tsr
@@ -417,12 +416,20 @@ def get_std_map(batch, comm_size):
 	tsr = batch.permute(1,2,3,0,4).contiguous()
 	tsr = tsr.view(n_channels, 128, 256, 32 * bsz) #7 x 128 x 256 x bsz*32
 	
-	#sum along days
+	#sum along days in the batch on the current process
 	sum_tsr = tsr.sum(-1)
+	#summ along days in the batch on all the processes
 	all_reduce_sum(sum_tsr)
 	mean_tsr = sum_tsr / (bsz * 32 * comm_size)
-	std_tsr = torch.sqrt((tsr - mean_tsr) ** 2 / (bsz * 32 * comm_size))
-	logging.info("std tsr {}".format(std_tsr[1]))
+	mean_tsr.unsqueeze_(-1)#7 x 128 x 256 x 1
+	mean_tsr = mean_tsr.expand(7,128,256,32*bsz) #7 x 128 x 256 x 64
+	#calc sq diff on current batch on the process and sum them up along days dimension
+	sq_diff = ((tsr - mean_tsr) ** 2).sum(-1)
+	#calc sq diffs for all the tensors
+	all_reduce_sum(sq_diff)
+	logging.info("sq diff size {} ".format(sq_diff.shape))
+	std = torch.sqrt(sq_diff / (bsz * 32 * comm_size))
+	logging.info("std tsr for tas{} ".format(std_tsr[1]))
 	return std_tsr
 
 def get_tas_zeros_fraq(batch):
@@ -443,7 +450,19 @@ def get_tas_zeros_fraq(batch):
 	target.cuda()
 
 	zeros = (target != res)
-	zero_fraq = zeros.shape[0] / tas_shape
+	#sum all zeros on all processes
+	zeros_ts = torch.tensor(zeros.shape[0])
+	logging.info("zero ts on one process {}".format(zeros_ts))
+	zeros_ts.cuda()
+	all_reduce_sum(zeros_ts)
+	logging.info("zeros ts on all processes {}".format(zero_ts))
+	#sum all sizes of tensors
+	tas_shape_ts = torch.tensor(tas_shape)
+	logging.info("tas shape on one process {}".format(tas_shape_ts))
+	tas_shape_ts.cuda()
+	all_reduce_sum(tas_shape_ts)
+	logging.info("tas shape on all processes {}".format(tas_shape_ts))
+	zero_fraq = zeros_ts.item() / tas_shape_ts.item()
 	logging.info("zero_fraq {}".format(zero_fraq))
 	return zero_fraq
 
@@ -486,7 +505,6 @@ def save_data(months_to_save, save_dir, process_rank, exp_id, dates_mapping):
 		for date in dates_mapping: 
 			csv_writer.writerow(date)
 	return
-
 
 
 
