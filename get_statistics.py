@@ -9,26 +9,28 @@ import torch
 import logging
 import csv
 from Normalizer import Normalizer
-
+import netCDF4 as n
 N_CELLS = len(grid_cells_for_stat)
 
 
-def process_tensors(data_path, nrm):
+def process_tensors(data_path, exp_id, nrm):
 
 	clmt_var_keys = list(clmt_vars.keys())
-
+	data_path = data_path + "exp_" + str(exp_id) + "/"
 	tas_tsrs, tasmin_tsrs, tasmax_tsrs = [], [], []
 	rhs_tsrs, rhsmin_tsrs , rhsmax_tsrs = [], [], []
 	pr_tsrs = []
-
 	#tensor dim: 7 x 128 x 256 x 32
 	for filename in os.listdir(data_path):
 		ts_name = os.path.join(data_path, filename)
 		tsr = torch.load(ts_name)
 		tsr = tsr.detach()
-		
 		#Denormalize tensor
-		nrm.denormalize(tsr)
+		tsr = nrm.denormalize(tsr)
+		#rh = tsr[4]
+		#rh = rh[rh > 100]
+		
+		#print(filename, len(rh))
 		
 		pr_tsrs.append(tsr[clmt_var_keys.index('pr')])
 		tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
@@ -105,14 +107,14 @@ def get_p_stat(pr):
 
 	N_DAYS = pr.shape[-1]
 	pr = np.asarray(pr)
-	pr_min = np.min(pr)
-	n_zero_vals = len(pr[pr == 0])
+	pr_mean = np.mean(pr)
+	n_zero_vals = len(pr[pr == 0.0])
 	zero_fraq = n_zero_vals / N_DAYS
 	non_zero = pr[pr != 0.0]
 	non_zero_mean = np.mean(non_zero)
 	non_zero_std = np.std(non_zero)
 
-	return [pr_min, zero_fraq, non_zero_mean, non_zero_std]
+	return [pr_mean, zero_fraq, non_zero_mean, non_zero_std]
 
 
 
@@ -295,7 +297,7 @@ def write_to_csv_for_time_series(tsrs, path, prefix):
 				lat, lon = val
 				tensor = tsr[lat, lon]
 				arr = np.asarray(tensor)
-				cv_writer.writerow(call + " " + arr)					
+				cv_writer.writerow(arr)					
 				
 		ts_ctr += 1
 
@@ -323,23 +325,37 @@ def main():
 	exp_id = args.exp_id
 	real_csv_dir = args.real_csv_dir	
 	norms_dir = args.norms_dir
-	print(exp_id)
-
-	nrm = Normalizer()
-	nrm.load_means_and_stds(norms_dir)
-
-
-	tsrs = process_tensors(gen_data_dir, nrm)
-	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
-
-
-	"""
-	real_tsrs = process_tensors(real_data_dir, nrm)
-	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
-	"""
 
 
 	
+	#test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/data_for_gan_test/MIROC5_Real/exp_18/4.pt')
+	test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/MIROC5_Tensors_norm/norm_rcp60_r1i1p1.pt')
+	pr = np.asarray(test_tsr[1])
+	nonzero = pr[pr < -50.0]
+	print(nonzero)
+
+	#filename = '/pic/projects/GCAM/DeepClimGAN-input/MIROC5/rhs_day_MIROC5_rcp60_r2i1p1_21000101-21001231.nc'
+	#nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')
+	#var = nc.variables['rhs'][:]
+	#pr = np.asarray(var)
+	#pr = pr[pr > 100]
+	#print(len(pr), np.max(pr))
+
+
+	
+	nrm = Normalizer()
+	nrm.load_means_and_stds(norms_dir)
+	print(nrm.clmt_stats)
+	
+	
+	"""
+	tsrs = process_tensors(gen_data_dir, exp_id, nrm)
+	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
+
+	#print("real")
+	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm)
+	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
+
 	#Generated data stats
 	p_stat = get_p_stat_for_cells(pr_gen)
 	tas_stats = get_tas_stat(tas_gen)
@@ -349,18 +365,16 @@ def main():
 	dewpoint = get_dewpoint_stat_for_cells(rhs_gen, tas_gen)
 	gen_stats = [p_stat, tas_stats, tas_min_max_stat, rhs_stats, rhsmin_max, dewpoint]
 	write_stats_to_csv(gen_stats, stats_dir, exp_id, "gen")
-		
 
-	"""	
 	#save ptime series for precip from 2 processes
-	precip_gen = tsrs[0][:5]
-	tas_gen = tsrs[1][:5]
-	tasmin_gen = tsrs[2][:5]
-	tasmax_gen = tsrs[3][:5]
-	rhs_gen = tsrs[4][:5]
-	rhsmin_gen = tsrs[5][:5]
-	rhsmax_gen = tsrs[6][:5]	
-
+	precip_gen = tsrs[0][:2]
+	tas_gen = tsrs[1][:2]
+	tasmin_gen = tsrs[2][:2]
+	tasmax_gen = tsrs[3][:2]
+	rhs_gen = tsrs[4][:2]
+	rhsmin_gen = tsrs[5][:2]
+	rhsmax_gen = tsrs[6][:2]	
+	
 	
 	write_to_csv_for_time_series(precip_gen, gen_csv_dir, "pr")
 	write_to_csv_for_time_series(tas_gen, gen_csv_dir, "tas")
@@ -369,7 +383,6 @@ def main():
 	write_to_csv_for_time_series(rhs_gen, gen_csv_dir, "rhs")
 	write_to_csv_for_time_series(rhsmin_gen, gen_csv_dir, "rhsmin")
 	write_to_csv_for_time_series(rhsmax_gen, gen_csv_dir, "rhsmax")
-	
 
 	#Real data stats
 	p_stat_real = get_p_stat_for_cells(pr_real)
@@ -379,18 +392,17 @@ def main():
 	rhsmin_max_real = get_rhs_min_max_stat_for_cells(rhs_real, rhsmin_real, rhsmax_real)
 	dewpoint_real = get_dewpoint_stat_for_cells(rhs_real, tas_real)
 	real_stats = [p_stat_real, tas_stat_real, tas_min_max_stat_real, rhs_stat_real, rhsmin_max_real, dewpoint_real]	
-	#write_stats_to_csv(real_stats, stats_dir, exp_id, "real")
-	
+	write_stats_to_csv(real_stats, stats_dir, exp_id, "real")
 
-	precip_real = real_tsrs[0][:5]
-	tas_real = real_tsrs[1][:5]
-	tasmin_real = real_tsrs[2][:5]
-	tasmax_real = real_tsrs[3][:5]
-	rhs_real = real_tsrs[4][:5]
-	rhsmin_real = real_tsrs[5][:5]
-	rhsmax_real = real_tsrs[6][:5]
-	
-	write_to_csv_for_time_series(precip_real, greal_csv_dir, "pr")
+	precip_real = real_tsrs[0][0:2]
+	tas_real = real_tsrs[1][0:2]
+	tasmin_real = real_tsrs[2][0:2]
+	tasmax_real = real_tsrs[3][0:2]
+	rhs_real = real_tsrs[4][0:2]
+	rhsmin_real = real_tsrs[5][0:2]
+	rhsmax_real = real_tsrs[6][0:2]
+
+	write_to_csv_for_time_series(precip_real, real_csv_dir, "pr")
 	write_to_csv_for_time_series(tas_real, real_csv_dir, "tas")
 	write_to_csv_for_time_series(tasmin_real, real_csv_dir, "tasmin")
 	write_to_csv_for_time_series(tasmax_real, real_csv_dir, "tasmax")
@@ -398,4 +410,5 @@ def main():
 	write_to_csv_for_time_series(rhsmin_real, real_csv_dir, "rhsmin")
 	write_to_csv_for_time_series(rhsmax_real, real_csv_dir, "rhsmax")
 	"""
+
 main()

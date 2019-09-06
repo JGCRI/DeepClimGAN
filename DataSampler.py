@@ -33,6 +33,8 @@ class DataSampler(Sampler):
 			self.file_indices.append(indices)	
 
 		self.file_indices = np.asarray(self.file_indices)
+		self.permute()
+
 		
 			
 	def get_indices(self, idx_range):
@@ -62,9 +64,8 @@ class DataSampler(Sampler):
 		files = self.file_indices
 		#permute indices within a file
 		log.info("Permuting indices in each file")
-		for i in range(len(files)):
+		for i in range(self.n_files):
 			self.file_indices[i] = np.random.permutation(self.file_indices[i])
-		
 
 
 	def __iter__(self):

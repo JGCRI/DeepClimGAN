@@ -75,9 +75,6 @@ class NETCDFDataPartition(data.Dataset):
 		filename = self.partition[file_idx]
 		
 		train = self.data[file_idx]
-		#train_shape = train.shape[-1]#number of days total
-		#year = idx // 384 + 1
-		#month = months[idx // 32 // year]
 
 
 		current_month = train[:, :, : , idx:(idx + n_days)] #output size is N_channels x H x W x 32

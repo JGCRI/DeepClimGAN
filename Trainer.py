@@ -24,9 +24,9 @@ import logging
 import csv
 
 
-exp_id = 17
+exp_id = 21
 
-ex = Experiment('Experiment ' + str(exp_id) +', without experience replay, without noise')
+ex = Experiment('Experiment ' + str(exp_id) +', pretrain generator')
 
 
 #MongoDB
@@ -35,6 +35,8 @@ DATABASE_NAME = "climate_gan"
 
 ex.observers.append(MongoObserver.create(url=DATABASE_URL, db_name=DATABASE_NAME))
 
+
+n_channels = len(clmt_vars)
 #sacred configs
 @ex.config
 def my_config():
@@ -46,8 +48,8 @@ def my_config():
 	
 	#hyperparamteres TODO:
 	label_smoothing = False
-	add_noise = False
-	experience_replay = False
+	add_noise = True
+	experience_replay = True
 	replay_buffer_size = batch_size * 20
 	lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
 	l1_lambda = 10
@@ -56,9 +58,8 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir  = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
-		self.noise = None
 		#buffer for expereince replay		
 		self.replay_buffer = []
 		self.sorted_files = sort_files_by_size(self.data_dir)
@@ -70,8 +71,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir
 	
 	@ex.capture
 	def get_exp_info(self, _run):
@@ -92,6 +93,8 @@ class Trainer:
 
 		#create optimizers
 		loss_func = torch.nn.BCELoss()
+		mse_loss_func = torch.nn.MSELoss()
+		
 		if self.label_smoothing:
 			loss_func = torch.nn.KLDivLoss()
 		
@@ -125,13 +128,10 @@ class Trainer:
 		dl = data.DataLoader(ds, batch_sampler=b_sampler)
 		dl_iter = iter(dl)
 	
-		#Normalizer
-		#nrm = Normalizer()
-		#nrm.load_means_and_stds(self.norms_dir)
-
 		loss_n_updates, report_step = 0, 0
 		n_real_saved, n_gen_saved = 0, 0
 		dates_mapping = []
+		min_loss = float('inf')
 			
 		#Training loop
 		for current_epoch in range(1, self.num_epoch + 1):		
@@ -150,23 +150,26 @@ class Trainer:
 					#start new epoch
 					break
 		
-				#report avg_loss per epoch
-				if loss_n_updates == report_avg_loss:
-					D_epoch_loss = torch.tensor(D_epoch_loss).to(device)
-					G_epoch_loss = torch.tensor(G_epoch_loss).to(device)
-					all_reduce_dist([D_epoch_loss])
-					all_reduce_dist([G_epoch_loss])									
-					D_avg_epoch_loss = D_epoch_loss / loss_n_updates
-					G_avg_epoch_loss = G_epoch_loss / loss_n_updates
-					self._run.log_scalar('D_avg_epoch_loss', D_avg_epoch_loss.item(), report_step)
-					self._run.log_scalar('G_avg_epoch_loss', G_avg_epoch_loss.item(), report_step)
-					loss_n_updates = 0
-					report_step += 1
-					D_epoch_loss, G_epoch_loss = 0, 0
+				if not self.pretrain:
+					#report avg_loss per epoch
+					if loss_n_updates == report_avg_loss:
+						D_epoch_loss = torch.tensor(D_epoch_loss).to(device)
+						G_epoch_loss = torch.tensor(G_epoch_loss).to(device)
+						all_reduce_dist([D_epoch_loss])
+						all_reduce_dist([G_epoch_loss])									
+						D_avg_epoch_loss = D_epoch_loss / loss_n_updates
+						G_avg_epoch_loss = G_epoch_loss / loss_n_updates
+						self._run.log_scalar('D_avg_epoch_loss', D_avg_epoch_loss.item(), report_step)
+						self._run.log_scalar('G_avg_epoch_loss', G_avg_epoch_loss.item(), report_step)
+						loss_n_updates = 0
+						report_step += 1
+						D_epoch_loss, G_epoch_loss = 0, 0
 					
 				#unwrap the batch			
 				current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
-				
+				current_month_to_save = current_month
+					
+		
 				if self.label_smoothing:
 					ts = np.full((self.batch_size), 0.9)
 					real_labels = ut.to_variable(torch.FloatTensor(ts), requires_grad = False)
@@ -187,6 +190,20 @@ class Trainer:
 				z = ds.get_noise(self.z_shape, self.batch_size)
 				z = z.to(device)
 				
+				if self.pretrain:
+					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
+					loss = pretrain_G(netG, z, avg_ctxt_for_G, high_res_for_G,current_month, mse_loss_func, comm_size, device)
+					
+					loss.backward()
+					self._run.log_scalar('g_loss {}'.format(loss.item()))
+					logging.info("epoch {}, rank {}, update {}, g loss {:0.18f}".format(current_epoch, rank, n_updates, loss.item()))
+					average_gradients()
+					g_optim.step()
+					if loss.item() < min_loss:
+						min_loss = min(min_loss, loss.item())
+						save_model(netG, self.save_model_dir + str(exp_id))
+			
+				"""
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 				if n_updates % 2 == 1:
 					#save gradients for D
@@ -208,9 +225,8 @@ class Trainer:
 					
 					#save real to calculate statistics
 					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
-						current_month = current_month.to(cpu_dev)
-						real_data_saved.append(current_month)
-						current_month = current_month.to(device)
+						current_month_to_save = current_month_to_save.to(cpu_dev)
+						real_data_saved.append(current_month_to_save)
 						n_real_saved += self.batch_size
 						dates_mapping.append(year_month_date)
 						if n_real_saved >= n_data_to_save_on_process:
@@ -335,8 +351,8 @@ class Trainer:
 							gen_data_saved = []
 					#save real data
 					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
-						current_month = current_month.to(cpu_dev)
-						real_data_saved.append(current_month)
+						current_month_to_save = current_month_to_save.to(cpu_dev)
+						real_data_saved.append(current_month_to_save)
 						n_real_saved += self.batch_size
 						dates_mapping.append(year_month_date)
 						if n_real_saved >= n_data_to_save_on_process:
@@ -352,9 +368,10 @@ class Trainer:
 					G_epoch_loss += g_loss
 					logging.info("epoch {}, rank {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, rank, n_updates, g_loss.item()))
 					self._run.log_scalar('g_loss', g_loss.item(), n_updates)
+				"""
 					
 				n_updates += 1	
-				loss_n_updates += 1
+				#loss_n_updates += 1
 
 def average_gradients(model):
 	size = float(dist.get_world_size())
@@ -367,6 +384,79 @@ def all_reduce_dist(sums):
 		dist.all_reduce(sum, op=dist.ReduceOp.SUM)
 
 
+
+def pretrain_G(netG, z, avg_ctxt_for_G, high_res_for_G,current_month_batch, mse_loss_func, comm_size, device):
+	fake_outputs = netG(z, avg_ctxt_for_G, high_res_for_G)
+
+	#compute targets
+	map_mean_target = get_mean_map(current_month_batch, comm_size)
+	map_std_target = get_std_map(current_month_batch, comm_size)
+	
+	#compute stat for fake
+	batch_fake_outputs_mean = get_mean_map(fake_outputs, comm_size)
+	batch_fake_outputs_std = get_std_map(fake_outputs, comm_size)
+	loss = mse_loss_func(map_mean_target, batch_fake_outputs_mean) + mse_loss_func(map_std_target, batch_fake_outputs_std) + get_tas_zero_fraq(fake_outputs)
+	return loss
+
+
+def get_mean_map(batch, comm_size):
+	#merge batches along days axes
+	bsz = batch.shape[0]	
+	tsr = batch.permute(1,2,3,0,4).contiguous()
+	tsr = tsr.view(n_channels, 128,256,32 * bsz) #7 x 128 x 256 x bsz*32
+	#sum along days dimension
+	sum_tsr = tsr.sum(-1)
+	
+	all_reduce_sum(sum_tsr)
+	mean_tsr = sum_tsr / (bsz * 32 * comm_size)
+	return mean_tsr
+	
+
+def get_std_map(batch, comm_size):
+	bsz = batch.shape[0]
+	tsr = batch.permute(1,2,3,0,4).contiguous()
+	tsr = tsr.view(n_channels, 128, 256, 32 * bsz) #7 x 128 x 256 x bsz*32
+	
+	#sum along days
+	sum_tsr = tsr.sum(-1)
+	all_reduce_sum(sum_tsr)
+	mean_tsr = sum_tsr / (bsz * 32 * comm_size)
+	std_tsr = torch.sqrt((tsr - mean_tsr) ** 2 / (bsz * 32 * comm_size))
+	logging.info("std tsr {}".format(std_tsr[1]))
+	return std_tsr
+
+def get_tas_zeros_fraq(batch):
+	bsz = batch.shape[0]
+	tsr = batch.permute(1,2,3,0,4).contiguous()
+	tsr = tsr.view(n_channels, 128, 256, 32 * bsz)
+	tas = tsr[clmt_vars.keys().index('tas')]
+	tasmin = tsr[clmt_vars.keys().index('tasmin')]
+	tasmax = tsr[clmt_vars.keys().index('tasmax')]
+	
+	res = tas >= tasmin and tas <= tasmax
+	res = res.reshape(-1)
+	logging.info("tas in range {}".format(res))
+	tasmin = tasmin.reshape(-1)
+	tas_shape = tasmin.shape
+	target = torch.ones(tas_shape)
+	target.fill_(True)
+	target.cuda()
+
+	zeros = (target != res)
+	zero_fraq = zeros.shape[0] / tas_shape
+	logging.info("zero_fraq {}".format(zero_fraq))
+	return zero_fraq
+
+	
+def save_model(netG, dir):
+	model.save_state_dict(dir + '/model.pt')
+	return
+
+
+def all_reduce_sum(tsr):
+	dist.all_reduce(tsr,op=dist.ReduceOp.SUM)
+	return
+
 	
 def save_data(months_to_save, save_dir, process_rank, exp_id, dates_mapping):
 	#Tensor shape is batch_size x 7 x 128 x 256 x 32
@@ -376,17 +466,22 @@ def save_data(months_to_save, save_dir, process_rank, exp_id, dates_mapping):
 	batch_size = months_to_save[0].shape[0]
 	n_channels = months_to_save[0].shape[1]
 	n_months = len(months_to_save)
+	#logging.info("tensor shape {}".format(months_to_save[0].shape))
+	#logging.info("batch_size {}, n_channels {}, n_months {}".format(batch_size, n_channels, n_months))
+		
 	tensor = torch.cat(months_to_save, dim=0)#resulting tensor is batch_size*n_months x 7 x 128 x 256 x 32
-	tensor = tensor.view(n_channels, 128, 256, 32 * batch_size * n_months)
+	tensor = tensor.permute(1,2,3,0,4).contiguous()
+	tensor = tensor.view(n_channels, 128, 256, n_months * 32 * batch_size)
+
 	ts_name = os.path.join(save_dir + "exp_" + str(exp_id) + "/", str(process_rank))
 	torch.save(tensor, ts_name + ".pt")
 	
 	logging.info("Data is saved to {}".format(save_dir))
 
 	#TODO save dates mapping
-	fname = os.path.join(save_dir + "exp_" + str(exp_id) + "/",process_rank + "_"" + dates_mapping.csv")
+	fname = os.path.join(save_dir + "exp_" + str(exp_id) + "/", str(process_rank) + "_dates_mapping.csv")
 	with open(fname, 'w+') as of:
-		csv_writer = csv.writer(of, delimiter=', ')
+		csv_writer = csv.writer(of, delimiter=',')
 		#write date line by line (each date consists of N months, where N = batch size per process)
 		for date in dates_mapping: 
 			csv_writer.writerow(date)
@@ -414,7 +509,10 @@ if __name__ == "__main__":
 	parser.add_argument('--save_gen_data_update',type=int)
 	parser.add_argument('--n_data_to_save', type=int)
 	parser.add_argument('--norms_dir', type=str)
+	parser.add_argument('--pretrain', type=int)
+	parser.add_argument('--save_model_dir', type=str)
 	
+
 	args = parser.parse_args()
 
 	lrank = args.local_rank
@@ -427,6 +525,8 @@ if __name__ == "__main__":
 	save_gen_data_update = args.save_gen_data_update
 	n_data_to_save = args.n_data_to_save
 	norms_dir = args.norms_dir
+	pretrain=args.pretrain
+	save_model_dir = args.save_model_dir
 	
 	print(f'localrank: {lrank}	host: {os.uname()[1]}')
 	torch.cuda.set_device(lrank)
@@ -442,6 +542,8 @@ if __name__ == "__main__":
 		real_data_dir=real_data_dir,
 		save_gen_data_update=save_gen_data_update,
 		n_data_to_save=n_data_to_save, 
-		norms_dir=norms_dir)
+		norms_dir=norms_dir,
+		pretrain=pretrain,
+		save_model_dir=save_model_dir)
 	
 	ex.run()

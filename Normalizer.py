@@ -23,7 +23,7 @@ class Normalizer:
 		"""
 		Log denormalize channel
 		"""
-		x = np.exp(data) - 1
+		x = np.exp(data)- 1
 		return x
 
 	
@@ -72,6 +72,7 @@ class Normalizer:
 		Denormalize the tensor
 		"""
 	
+		#tsr = tsr.numpy()
 		for i, (var, val) in enumerate(clmt_vars.items()):
 			norm_type = val[1]
 			if norm_type == 'log_norm':

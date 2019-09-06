@@ -4,19 +4,21 @@ import torch.nn as nn
 
 from ops import *
 from Constants import clmt_vars
+import logging
+
 
 """
 reference: https://github.com/batsa003/videogan/blob/master/model.py
 """
 
-n_channels = len(clmt_vars)
-
+n_channels = len(clmt_vars.items())
 class Generator(nn.Module):
 	def __init__(self, h, w, t, ch, batch_size):
 		super(Generator, self).__init__()
 		
 		self.pool = pool2d()
 		self.relu = relu()
+		self.relu2 = nn.ReLU(inplace=True)
 		self.sigm = torch.nn.Sigmoid()
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
 			
@@ -126,9 +128,10 @@ class Generator(nn.Module):
 		#apply activation functions per channels: pr -> relu, rhs, rhsmin, rhsmax -> sigmoid
 		for i, (key, val) in enumerate(clmt_vars.items()):
 			if i == 0:
-				out[:,i] = self.relu(out[:,i].clone())
+				out[:,i] = self.relu2(out[:,i].clone())
 			elif i == 4 or i == 5 or i == 6:
 				out[:,i] = self.sigm(out[:,i].clone())
 
+		
 		return out
 
