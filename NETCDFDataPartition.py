@@ -107,7 +107,8 @@ class NETCDFDataPartition(data.Dataset):
 		channels, context_length = high_res_context.shape[1], high_res_context.shape[-1]
 		batch_size = avg_context.shape[0]
 		lon, lat = avg_context.shape[2], avg_context.shape[3]
-		high_res = high_res_context.reshape(batch_size, context_length*channels, lon, lat)
+		high_res_permuted = high_res_context.permute(0,1,4,2,3).contiguous()
+		high_res = high_res_permuted.reshape(batch_size, context_length*channels, lon, lat)
 		avg_ctxt = torch.mean(avg_context, -1)
 		return high_res, avg_ctxt
 

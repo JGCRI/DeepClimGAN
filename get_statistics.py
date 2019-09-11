@@ -27,7 +27,9 @@ def process_tensors(data_path, exp_id, nrm):
 		tsr = tsr.detach()
 		#Denormalize tensor
 		tsr = nrm.denormalize(tsr)
-		#rh = tsr[4]
+		#pr = tsr[4]
+		#notzeros = pr[pr > 0]
+		#print(len(pr), len(notzeros))
 		#rh = rh[rh > 100]
 		
 		#print(filename, len(rh))
@@ -326,13 +328,15 @@ def main():
 	real_csv_dir = args.real_csv_dir	
 	norms_dir = args.norms_dir
 
-
+	
+	real_csv_dir = real_csv_dir + "exp_" + str(exp_id) + "/"
+	gen_csv_dir = gen_csv_dir + "exp_" + str(exp_id) + "/"
 	
 	#test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/data_for_gan_test/MIROC5_Real/exp_18/4.pt')
-	test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/MIROC5_Tensors_norm/norm_rcp60_r1i1p1.pt')
-	pr = np.asarray(test_tsr[1])
-	nonzero = pr[pr < -50.0]
-	print(nonzero)
+	#test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/MIROC5_Tensors_norm/norm_rcp60_r1i1p1.pt')
+	#pr = np.asarray(test_tsr[1])
+	#nonzero = pr[pr < -50.0]
+	#print(nonzero)
 
 	#filename = '/pic/projects/GCAM/DeepClimGAN-input/MIROC5/rhs_day_MIROC5_rcp60_r2i1p1_21000101-21001231.nc'
 	#nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')
@@ -345,14 +349,11 @@ def main():
 	
 	nrm = Normalizer()
 	nrm.load_means_and_stds(norms_dir)
-	print(nrm.clmt_stats)
 	
 	
-	"""
 	tsrs = process_tensors(gen_data_dir, exp_id, nrm)
 	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
 
-	#print("real")
 	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm)
 	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
 
@@ -365,7 +366,7 @@ def main():
 	dewpoint = get_dewpoint_stat_for_cells(rhs_gen, tas_gen)
 	gen_stats = [p_stat, tas_stats, tas_min_max_stat, rhs_stats, rhsmin_max, dewpoint]
 	write_stats_to_csv(gen_stats, stats_dir, exp_id, "gen")
-
+	
 	#save ptime series for precip from 2 processes
 	precip_gen = tsrs[0][:2]
 	tas_gen = tsrs[1][:2]
@@ -374,7 +375,6 @@ def main():
 	rhs_gen = tsrs[4][:2]
 	rhsmin_gen = tsrs[5][:2]
 	rhsmax_gen = tsrs[6][:2]	
-	
 	
 	write_to_csv_for_time_series(precip_gen, gen_csv_dir, "pr")
 	write_to_csv_for_time_series(tas_gen, gen_csv_dir, "tas")
@@ -409,6 +409,5 @@ def main():
 	write_to_csv_for_time_series(rhs_real, real_csv_dir, "rhs")
 	write_to_csv_for_time_series(rhsmin_real, real_csv_dir, "rhsmin")
 	write_to_csv_for_time_series(rhsmax_real, real_csv_dir, "rhsmax")
-	"""
 
 main()
