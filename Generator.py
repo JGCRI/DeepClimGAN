@@ -28,23 +28,33 @@ class Generator(nn.Module):
 		
 		#block 1
 		self.upconv1 = upconv3d(128, 512)
-		self.batchNorm5d_1 = batchNorm5d(512+64+32)
+		n_features = 512 + 64 + 32
+		self.batchNorm5d_1 = batchNorm5d(n_features)
+		#self.layerNorm_1 = layerNorm(n_features)
 		
 		#block 2
 		self.upconv2 = upconv3d(512+64+32, 256)
-		self.batchNorm5d_2 = batchNorm5d(256+16+32)
+		n_features = 256 + 32 + 16
+		self.batchNorm5d_2 = batchNorm5d(n_features)
+		#self.layerNorm_2 = layerNorm(n_features)
 		
 		#block 3
 		self.upconv3 = upconv3d(256+16+32, 128)
-		self.batchNorm5d_3 = batchNorm5d(128+16+8)
+		n_features = 128 + 16 + 8
+		self.batchNorm5d_3 = batchNorm5d(n_features)
+		#self.layerNorm_3 = layerNorm(n_features)
 
 		#block 4
 		self.upconv4 = upconv3d(128+16+8, 64)
-		self.batchNorm5d_4 = batchNorm5d(64+8+4)
+		n_features = 64 + 8 + 4
+		self.batchNorm5d_4 = batchNorm5d(n_features)
+		#self.layerNorm_4 = layerNorm(n_features)
 		
 		#block 5
 		self.upconv5 = upconv3d(64+8+4, 32)
+		n_features = 32 + 2 + init_ctxt_channel_size
 		self.batchNorm5d_5 = batchNorm5d(32+2+init_ctxt_channel_size)
+		#self.layerNorm_5 = layerNorm(n_features)
 		
 		#block 6
 		self.upconv6 = upconv3d_same(init_ctxt_channel_size+2+32, n_channels)
@@ -83,6 +93,8 @@ class Generator(nn.Module):
 		avg1 = avg1.unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)		
 		x = torch.cat([x, avg1, init1], dim=1)#concat across feature channels
 		x = self.relu(self.batchNorm5d_1(x))
+		#x = self.relu(self.layerNorm(x))
+		
 		
 		#block 2
 		x = self.upconv2(x)
@@ -93,6 +105,7 @@ class Generator(nn.Module):
 		avg2 = avg2.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg2, init2],dim=1)
 		x = self.relu(self.batchNorm5d_2(x))
+		#x = self.relu(self.layerNorm(x))
 		
 		#block3
 		x = self.upconv3(x)
@@ -103,6 +116,8 @@ class Generator(nn.Module):
 		avg3 = avg3.unsqueeze(-1).repeat(1,1,1,1,rep_factor)		
 		x = torch.cat([x, avg3, init3],dim=1)
 		x = self.relu(self.batchNorm5d_3(x))
+		#x = self.relu(self.layerNorm(x))
+
 
 		#block4
 		x = self.upconv4(x)
@@ -113,7 +128,9 @@ class Generator(nn.Module):
 		avg4 = avg4.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg4, init4],dim=1)
 		x = self.relu(self.batchNorm5d_4(x))
-			
+		#x = self.relu(self.layerNorm(x))		
+
+	
 		#block5
 		x = self.upconv5(x)
 		rep_factor = x.shape[-1]
@@ -121,6 +138,7 @@ class Generator(nn.Module):
 		avg5 = avg_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, init5, avg5],dim=1)
 		x = self.relu(self.batchNorm5d_5(x))
+		#x = self.relu(self.layerNorm(x))
 		
 		#block 6
 		out = self.upconv6(x)

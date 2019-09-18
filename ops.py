@@ -13,6 +13,10 @@ def upconv3d_same(in_channels, out_channels, kernel_size=3, stride = 1, padding 
 def batchNorm5d(num_features, eps = 1e-5):
 	return nn.BatchNorm3d(num_features, eps = eps)
 
+#input size is 2 x V x 128 x 256 x 32 or V x 128 x 256 x 32
+def layerNorm(features):
+	return nn.LayerNorm(features)
+
 def relu(inplace = True):
 	return nn.ReLU(inplace)
 

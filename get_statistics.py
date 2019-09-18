@@ -304,6 +304,48 @@ def write_to_csv_for_time_series(tsrs, path, prefix):
 		ts_ctr += 1
 
 
+def check_pr(pr_real):
+	pr = np.asarray(pr_real)
+	N_days = pr.shape[-1]
+	zero_fraq = len(pr[pr == 0]) / N_days * 128 * 256
+	print("neg fraq {}".format(zero_fraq))
+	pr_norm = np.log(1 + pr)
+	negatives = pr_norm[pr_norm < 0]
+	print("Negative values in pr after log norm {}".format(len(negatives)))
+	
+	relu_pr_norm = abs(pr_norm)
+	denorm_pr = np.exp(relu_pr_norm)- 1
+	print("pr ground truth \n")
+	print(pr[0][1][:100])
+	print("\n")
+
+	print("pr after normalization -> relu ->  denormalized \n")
+	print(denorm_pr[0][1][:100])
+	print("\n")
+
+def check_rhs(rhs_real, mean, std):
+	rhs = np.asarray(rhs_real)
+	rhs_norm = (rhs - mean) / std	
+	
+	#apply sigmoid
+	rhs_sigm = sigmoid(rhs_norm)
+	
+	#denormalize values
+	rhs_denorm = rhs_sigm * std + mean
+	
+	print("rhs ground truth\n")
+	print(rhs[0][0][:100])
+	print("\n")
+
+	print("rhs after normalization -> sigmoid -> denormalization")
+	print(rhs_denorm[0][0][:100])
+	print("\n")
+
+
+def sigmoid(x):
+	return 1 / (1 + np.exp(-x))	
+
+
 def main():
 	
 
@@ -356,6 +398,11 @@ def main():
 
 	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm)
 	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
+	#check_pr(pr_real)
+
+	#rhs_mean, rhs_std = nrm.clmt_stats["rhs"]
+	#print(rhs_mean, rhs_std)
+	#check_rhs(rhs_real, rhs_mean, rhs_std)
 
 	#Generated data stats
 	p_stat = get_p_stat_for_cells(pr_gen)

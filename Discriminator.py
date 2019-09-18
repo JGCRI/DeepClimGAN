@@ -19,9 +19,11 @@ class Discriminator(nn.Module):
 			lrelu(0.2),
 			conv3d(128, 256),
 			batchNorm5d(256, 1e-3),
+			#layernorm(256),
 			lrelu(0.2),
 			conv3d(256, 512),
 			batchNorm5d(512, 1e-3),
+			#layerNorm(512),
 			lrelu(0.2),
 			conv3d(512,2))
 		

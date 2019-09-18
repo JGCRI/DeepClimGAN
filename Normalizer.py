@@ -91,9 +91,9 @@ class Normalizer:
 		tas_mean, tas_std = torch.load(dir+'tas_mean.pt').item(), torch.load(dir+'tas_std.pt').item()
 		tasmin_mean, tasmin_std = torch.load(dir+'tasmin_mean.pt').item(), torch.load(dir+'tasmin_std.pt').item()
 		tasmax_mean, tasmax_std = torch.load(dir+'tasmax_mean.pt').item(), torch.load(dir+'tasmax_std.pt').item()
-		rhs_mean, rhs_std = torch.load(dir+'rhs_mean.pt').item(), torch.load(dir+'rhs_std.pt').item()
-		rhsmin_mean, rhsmin_std = torch.load(dir+'rhsmin_mean.pt').item(), torch.load(dir+'rhsmin_std.pt').item()
-		rhsmax_mean, rhsmax_std = torch.load(dir+'rhsmax_mean.pt').item(), torch.load(dir+'rhsmax_std.pt').item()
+		#rhs_mean, rhs_std = torch.load(dir+'rhs_mean.pt').item(), torch.load(dir+'rhs_std.pt').item()
+		#rhsmin_mean, rhsmin_std = torch.load(dir+'rhsmin_mean.pt').item(), torch.load(dir+'rhsmin_std.pt').item()
+		#rhsmax_mean, rhsmax_std = torch.load(dir+'rhsmax_mean.pt').item(), torch.load(dir+'rhsmax_std.pt').item()
 
 
 		"""
@@ -109,9 +109,9 @@ class Normalizer:
 		self.clmt_stats['tas'] = [tas_mean, tas_std]
 		self.clmt_stats['tasmin'] = [tasmin_mean, tasmin_std]
 		self.clmt_stats['tasmax'] = [tasmax_mean, tasmax_std]
-		self.clmt_stats['rhs'] = [rhs_mean, rhs_std]
-		self.clmt_stats['rhsmin'] = [rhsmin_mean, rhsmin_std]
-		self.clmt_stats['rhsmax'] = [rhsmax_mean, rhsmax_std]
+		#self.clmt_stats['rhs'] = [rhs_mean, rhs_std]
+		#self.clmt_stats['rhsmin'] = [rhsmin_mean, rhsmin_std]
+		#self.clmt_stats['rhsmax'] = [rhsmax_mean, rhsmax_std]
 		
 		return		
 

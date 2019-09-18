@@ -28,9 +28,9 @@ clmt_vars = {
 	'tas' : [tas_day_dir,'stand'],
 	'tasmin' : [tas_min_dir,'stand'],
 	'tasmax' : [tas_max_dir,'stand'],
-	'rhsmin' : [rhs_min_dir,'stand'],
-	'rhsmax' : [rhs_max_dir,'stand'],
-	'rhs' : [rhs_day_dir,'stand']
+	'rhsmin' : [rhs_min_dir,''],
+	'rhsmax' : [rhs_max_dir,''],
+	'rhs' : [rhs_day_dir,'']
 }
 
 
