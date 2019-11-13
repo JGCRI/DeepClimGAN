@@ -23,8 +23,8 @@ import logging
 import csv
 
 
-exp_id = 31
-ex = Experiment('Exp 31 (2) with  pretrain Generator')
+exp_id = 38
+ex = Experiment('Exp 38: Training GAN and saving model after 10k updates')
 
 
 #MongoDB
@@ -55,14 +55,14 @@ class Trainer:
 	@ex.capture
 	def __init__(self):
 		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir  = self.set_hyperparameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		#buffer for expereince replay		
 		self.replay_buffer = []
 		self.sorted_files = sort_files_by_size(self.data_dir)
 		self.world_size = dist.get_world_size()		
 		self.partition = snake_data_partition(self.sorted_files, self.world_size)
-		self.save_model = '/pic/projects/GCAM/DeepClimGAN-input/data_for_gan_test/saved_model/exp_29/'
+		self.save_model = '/pic/projects/GCAM/DeepClimGAN-input/data_for_gan_test/saved_model/exp_32/'
 
 
 	@ex.capture
@@ -70,8 +70,8 @@ class Trainer:
 		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder
 	
 	@ex.capture
 	def get_exp_info(self, _run):
@@ -86,7 +86,7 @@ class Trainer:
 		"""
 
 		#build models
-		netD = Discriminator(self.label_smoothing)
+		netD = Discriminator(self.label_smoothing, self.is_autoencoder)
 		netD.apply(ut.weights_init)
 		
 		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size)		
@@ -121,6 +121,8 @@ class Trainer:
 		#reset the batch size based on the number of processes used
 		self.total_batch_size = self.batch_size		
 		self.batch_size = self.batch_size // comm_size
+		#N_updates_per_batch = 4
+
 		self.replay_buffer_size = 20 * self.batch_size
 		n_data_to_save_on_process = self.n_data_to_save // comm_size #should be on CPU
 		
@@ -190,21 +192,49 @@ class Trainer:
 				real_labels = real_labels.to(device)
 				fake_labels = fake_labels.to(device)
 				
+				start_from = 0
+				#b_size_for_small_update = self.batch_size // N_updates_per_batch
+				#for k in range(N_updates_per_batch):
+			
 				#ship tensors to devices
+				#current_month = current_month[start_from:(start_from+b_size_for_small_update)].to(device)
+				#avg_context = avg_context[start_from:(start_from+b_size_for_small_update)].to(device)
+				#high_res_context = high_res_context[start_from:(start_from+b_size_for_small_update)].to(device)
+
 				current_month = current_month.to(device)
 				avg_context = avg_context.to(device)
 				high_res_context = high_res_context.to(device)
-				
+
 
 				#current_month = ut.to_variable(current_month)
 				#avg_context  = ut.to_variable(avg_context)
 				#high_res_context = ut.to_variable(high_res_context)
-					
+				
 				#sample noise
 				z = ds.get_noise(self.z_shape, self.batch_size)
+				#z = ds.get_noise(self.z_shape, b_size_for_small_update)
 				z = z.to(device)
+				#start_from = start_from + b_size_for_small_update
 				
-				if self.pretrain:
+				if self.is_autoencoder:
+					netG.zero_grad()
+					netD.zero_grad()
+					input = ds.build_input_for_D(current_month, avg_context, high_res_context)			
+					outputs = netD(input).squeeze()
+					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
+					generated_month = netG(outputs, avg_ctxt_for_G, high_res_for_G)
+					reconstruction_loss = mse_loss_func(current_month, generated_month)
+					logging.info("reconstruction_loss{}\n".format(reconstruction_loss))
+					self._run.log_scalar('reconstruct_loss', reconstruction_loss.item(), n_updates)
+					reconstruction_loss.backward()
+					#average_gradients(netG)
+					#g_optim.step()
+					#average_gradients(netD)
+					#g_optim.step()
+					#d_optim.step()
+
+
+				if self.pretrain and not self.is_autoencoder:
 					netG.zero_grad()
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
 					fake_outputs = netG(z, avg_ctxt_for_G, high_res_for_G)	
@@ -217,9 +247,11 @@ class Trainer:
 					#	logging.info("std losses {}\n".format(losses["std_losses"]))
 					logging.info("epoch {}, rank {}, update {}, g loss {:0.18f}".format(current_epoch, rank, n_updates, total_loss.item()))
 					total_loss.backward()
+					#divide by number of iterations
 					average_gradients(netG)
 					g_optim.step()
 					
+				if self.pretrain or self.is_autoencoder:
 					if n_updates == 5000 and rank == 0:
 						save_model(netG, self.save_model)
 					
@@ -247,7 +279,6 @@ class Trainer:
 							#free buffer
 							gen_data_saved = []
 				
-
 				#GAN training
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 				if n_updates % 2 == 1:
@@ -283,12 +314,6 @@ class Trainer:
 					#report d_real_loss
 					self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates)
 					
-					#report accuracy
-					#correct = (real_labels.clone().detach().eq(outputs.clone().detach())).sum()
-					#acc = torch.tensor(correct)
-					#all_reduce_dist([acc])
-					#d_acc_real = acc / self.total_batch_size
-					#self._run.log_scalar('d_acc on real examples', d_acc_real.item(), n_updates)
 
 					#1B. Train D on fake
 					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)			
@@ -335,12 +360,6 @@ class Trainer:
 					self._run.log_scalar('d_fake_loss', d_fake_loss.item(), n_updates)
 					
 
-					#report accuracy
-					#correct = (fake_labels.clone().detach().eq(outputs.clone().detach())).sum()
-					#acc = torch.tensor(correct)	
-					#all_reduce_dist([acc])
-					#d_acc_fake = acc / self.total_batch_size	
-					#self._run.log_scalar('d_acc on fake examples', d_acc_fake.item(), n_updates)
 			
 					#Add the gradients from the all-real and all-fake batches	
 					d_loss = d_real_loss + d_fake_loss
@@ -349,12 +368,12 @@ class Trainer:
 					D_epoch_loss += d_loss.item()
 					
 					d_loss.backward()
+					#report d_loss
+					self._run.log_scalar('d_loss', d_loss.item(), n_updates)
 					
 					#AVERAGE_GRADIENTS
 					average_gradients(netD)
 					
-					#report d_loss
-					self._run.log_scalar('d_loss', d_loss.item(), n_updates)
 					
 					#Update weights of D
 					d_optim.step()
@@ -436,7 +455,6 @@ class Trainer:
 					G_epoch_loss += g_loss
 					logging.info("epoch {}, rank {}, update {}, g_loss = {:0.18f}\n".format(current_epoch, rank, n_updates, g_loss.item()))
 					self._run.log_scalar('g_loss', g_loss.item(), n_updates)
-				
 				n_updates += 1	
 				loss_n_updates += 1
 
@@ -673,7 +691,7 @@ if __name__ == "__main__":
 	parser.add_argument('--norms_dir', type=str)
 	parser.add_argument('--pretrain', type=int)
 	parser.add_argument('--save_model_dir', type=str)
-	
+	parser.add_argument('--is_autoencoder', type=int)
 
 	args = parser.parse_args()
 
@@ -689,11 +707,11 @@ if __name__ == "__main__":
 	norms_dir = args.norms_dir
 	pretrain=args.pretrain
 	save_model_dir = args.save_model_dir
+	is_autoencoder = args.is_autoencoder
 	
 	print(f'localrank: {lrank}	host: {os.uname()[1]}')
 	torch.cuda.set_device(lrank)
 	dist.init_process_group('nccl', 'env://')
-	
 
 	ex.add_config(
 		num_epoch=num_epoch,
@@ -706,6 +724,7 @@ if __name__ == "__main__":
 		n_data_to_save=n_data_to_save, 
 		norms_dir=norms_dir,
 		pretrain=pretrain,
-		save_model_dir=save_model_dir)
+		save_model_dir=save_model_dir,
+		is_autoencoder=is_autoencoder)
 	
 	ex.run()

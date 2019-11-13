@@ -10,10 +10,9 @@ import logging
 """
 reference: https://github.com/batsa003/videogan/blob/master/model.py
 """
-
 n_channels = len(clmt_vars.items())
 class Generator(nn.Module):
-	def __init__(self, h, w, t, ch, batch_size):
+	def __init__(self, h, w, t, ch, batch_size, z_shape):
 		super(Generator, self).__init__()
 		
 		self.pool = pool2d()
@@ -23,7 +22,7 @@ class Generator(nn.Module):
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
 			
 		#block 0
-		self.fc1 = fc(100, 512)
+		self.fc1 = fc(z_shape, 512)
 		self.fc2 = fc(512, 4096)
 		
 		#block 1
@@ -82,7 +81,11 @@ class Generator(nn.Module):
 
 		#block 0
 		batch_size = x.shape[0]
-		x = self.fc2(self.fc1(x)).reshape(batch_size, 128, 4, 8, 1)
+		fc1 = self.fc1(x)
+		fc2 = self.fc2(fc1)
+
+		#fc2 = self.fc2(x)#for pretraijing for z = 512
+		x = fc2.reshape(batch_size, 128, 4, 8, 1)
 				
 		#block 1
 		x = self.upconv1(x)
@@ -93,7 +96,7 @@ class Generator(nn.Module):
 		avg1 = avg1.unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)		
 		x = torch.cat([x, avg1, init1], dim=1)#concat across feature channels
 		x = self.relu(self.batchNorm5d_1(x))
-		#x = self.relu(self.layerNorm(x))
+		#x = self.relu(self.layerNorm_1(x))
 		
 		
 		#block 2
@@ -105,7 +108,7 @@ class Generator(nn.Module):
 		avg2 = avg2.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg2, init2],dim=1)
 		x = self.relu(self.batchNorm5d_2(x))
-		#x = self.relu(self.layerNorm(x))
+		#x = self.relu(self.layerNorm_2(x))
 		
 		#block3
 		x = self.upconv3(x)
@@ -116,7 +119,7 @@ class Generator(nn.Module):
 		avg3 = avg3.unsqueeze(-1).repeat(1,1,1,1,rep_factor)		
 		x = torch.cat([x, avg3, init3],dim=1)
 		x = self.relu(self.batchNorm5d_3(x))
-		#x = self.relu(self.layerNorm(x))
+		#x = self.relu(self.layerNorm_3(x))
 
 
 		#block4
@@ -128,7 +131,7 @@ class Generator(nn.Module):
 		avg4 = avg4.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg4, init4],dim=1)
 		x = self.relu(self.batchNorm5d_4(x))
-		#x = self.relu(self.layerNorm(x))		
+		#x = self.relu(self.layerNorm_4(x))		
 
 	
 		#block5
@@ -138,18 +141,34 @@ class Generator(nn.Module):
 		avg5 = avg_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, init5, avg5],dim=1)
 		x = self.relu(self.batchNorm5d_5(x))
-		#x = self.relu(self.layerNorm(x))
+		#x = self.relu(self.layerNorm_5(x))
 		
 		#block 6
 		out = self.upconv6(x)
-		
-		#apply activation functions per channels: pr -> relu, rhs, rhsmin, rhsmax -> sigmoid
-		for i, (key, val) in enumerate(clmt_vars.items()):
-			if i == 0:
-				out[:,i] = self.relu2(out[:,i].clone())
-			elif i == 4 or i == 5 or i == 6:
-				out[:,i] = self.sigm(out[:,i].clone())
 
+		keys = list(clmt_vars.keys())
+		pr_idx = keys.index('pr')		
+		tas_idx = keys.index('tas')
+		tasmin_idx = keys.index('tasmin')
+		tasmax_idx = keys.index('tasmax')
+		rhs_idx = keys.index('rhs')
+		rhsmin_idx = keys.index('rhsmin')
+		rhsmax_idx = keys.index('rhsmax')
+
+		#apply activation functions per channels: pr -> relu, rhsmin -> sigmoid
+		out[:,pr_idx] = self.relu2(out[:,pr_idx].clone())
+		out[:,rhsmin_idx] = self.sigm(out[:,rhsmin_idx].clone())
+
+
+		#apply reparametrization
+		out[:,tas_idx] = out[:,tasmin_idx] + torch.exp(out[:,tas_idx].clone())
+		out[:,tasmax_idx] = out[:,tas_idx] + torch.exp(out[:,tasmax_idx].clone())
 		
+		#first update daily avg rhs
+		out[:,rhs_idx] = self.sigm(out[:,rhsmin_idx] + torch.exp(out[:,rhs_idx].clone()))
+		
+		#then use it to update max rhs
+		out[:,rhsmax_idx] = self.sigm(out[:,rhs_idx] + torch.exp(out[:,rhsmax_idx].clone()))
+
 		return out
 

@@ -133,12 +133,18 @@ def snake_data_partition(sorted_files, world_size):
 	n_processes = world_size
 	file_groups = []
 	i = 0
-
+		
 	N = len(sorted_files)
 	
 	files = []
 	for file in sorted_files:
 		files.append(file[1])
+	
+	if n_processes == 1:
+		partition[0] = files
+		#partition[0] = [files[0]] #for testing
+		return partition
+
 	sorted_files = files
 	
 	#split files per groups

@@ -8,22 +8,26 @@ class Normalizer:
 		self.clmt_stats = {}
 
 	
-	def log_normalize_channel(self, data):
+	def log_normalize_channel(self, data,clmt_var):
 		"""
 		Log normalize the data (base e)
 		param: data (tensr) H x W x T
 		return normalized data
 		"""
-		x = np.log(1 + data)
+		mean = self.clmt_stats[clmt_var][0]
+		std = self.clmt_stats[clmt_var][1]
+		x = np.log(1 + data / std)
 		return x
 
 	
 
-	def log_denormalize_channel(self, data):
+	def log_denormalize_channel(self, data, clmt_var):
 		"""
 		Log denormalize channel
 		"""
-		x = np.exp(data)- 1
+		mean = self.clmt_stats[clmt_var][0]
+		std = self.clmt_stats[clmt_var][1]
+		x = (np.exp(data)- 1) * std
 		return x
 
 	
@@ -60,7 +64,7 @@ class Normalizer:
 		for i, (var, val) in enumerate(clmt_vars.items()):
 			norm_type = val[1]
 			if norm_type == 'log_norm':
-				tsr[i] = self.log_normalize_channel(tsr[i])
+				tsr[i] = self.log_normalize_channel(tsr[i], var)
 			elif norm_type == 'stand':
 				tsr[i] = self.standartize_channel(tsr[i], var)
 		return tsr
@@ -72,11 +76,10 @@ class Normalizer:
 		Denormalize the tensor
 		"""
 	
-		#tsr = tsr.numpy()
 		for i, (var, val) in enumerate(clmt_vars.items()):
 			norm_type = val[1]
 			if norm_type == 'log_norm':
-				tsr[i] = self.log_denormalize_channel(tsr[i])
+				tsr[i] = self.log_denormalize_channel(tsr[i], var)
 			elif norm_type == 'stand':
 				tsr[i] = self.destandartize_channel(tsr[i], var)
 		return tsr
@@ -91,27 +94,13 @@ class Normalizer:
 		tas_mean, tas_std = torch.load(dir+'tas_mean.pt').item(), torch.load(dir+'tas_std.pt').item()
 		tasmin_mean, tasmin_std = torch.load(dir+'tasmin_mean.pt').item(), torch.load(dir+'tasmin_std.pt').item()
 		tasmax_mean, tasmax_std = torch.load(dir+'tasmax_mean.pt').item(), torch.load(dir+'tasmax_std.pt').item()
-		#rhs_mean, rhs_std = torch.load(dir+'rhs_mean.pt').item(), torch.load(dir+'rhs_std.pt').item()
-		#rhsmin_mean, rhsmin_std = torch.load(dir+'rhsmin_mean.pt').item(), torch.load(dir+'rhsmin_std.pt').item()
-		#rhsmax_mean, rhsmax_std = torch.load(dir+'rhsmax_mean.pt').item(), torch.load(dir+'rhsmax_std.pt').item()
-
-
-		"""
-		print(tas_mean, tas_std)
-		print(tasmin_mean, tasmin_std)
-		print(tasmax_mean, tasmax_std)
-		print(rhs_mean, rhs_std)
-		print(rhsmin_mean, rhsmin_std)
-		print(rhsmax_mean, rhsmax_std)
-		"""
+		pr_mean, pr_std = torch.load(dir+'pr_mean.pt').item(), torch.load(dir+'pr_std.pt').item()
 
 				
 		self.clmt_stats['tas'] = [tas_mean, tas_std]
 		self.clmt_stats['tasmin'] = [tasmin_mean, tasmin_std]
 		self.clmt_stats['tasmax'] = [tasmax_mean, tasmax_std]
-		#self.clmt_stats['rhs'] = [rhs_mean, rhs_std]
-		#self.clmt_stats['rhsmin'] = [rhsmin_mean, rhsmin_std]
-		#self.clmt_stats['rhsmax'] = [rhsmax_mean, rhsmax_std]
+		self.clmt_stats['pr'] = [pr_mean, pr_std]
 		
 		return		
 

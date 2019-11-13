@@ -25,15 +25,9 @@ def process_tensors(data_path, exp_id, nrm):
 		ts_name = os.path.join(data_path, filename)
 		tsr = torch.load(ts_name)
 		tsr = tsr.detach()
+		
 		#Denormalize tensor
 		tsr = nrm.denormalize(tsr)
-		#pr = tsr[4]
-		#notzeros = pr[pr > 0]
-		#print(len(pr), len(notzeros))
-		#rh = rh[rh > 100]
-		
-		#print(filename, len(rh))
-		
 		pr_tsrs.append(tsr[clmt_var_keys.index('pr')])
 		tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
 		tasmin_tsrs.append(tsr[clmt_var_keys.index('tasmin')])
@@ -43,7 +37,6 @@ def process_tensors(data_path, exp_id, nrm):
 		rhs_tsrs.append(tsr[clmt_var_keys.index('rhs')])
 
 	return (pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs, rhs_tsrs, rhsmin_tsrs, rhsmax_tsrs)
-
 
 
 def merge_tensors(tsrs):
@@ -260,7 +253,7 @@ def calc_dewpoint(rhs, tas):
 	
 	alpha = float(6.112)
 	beta = float(17.62)
-	lambda_v = 243.12 + 273
+	lambda_v = 243.12
 	
 	rhs = np.asarray(rhs)
 	tas = np.asarray(tas)
@@ -280,9 +273,28 @@ def write_stats_to_csv(stats, fname, exp_id, type):
 	fname = os.path.join(fname, "exp_" + str(exp_id) + "/" + type + "/stats.csv")
 	with open(fname, mode='w+', newline='') as of:
 		c_writer = csv.writer(of, delimiter=',')
-		for stat in stats:
-			c_writer.writerow(stat)
+		for i in range(len(stats)):
+			header = get_header(idx)
+			c_writer.writerow(header)
+			c_writer.writerow(stats[i])
+			c_writer.writerow('\n')
+
+def get_header(idx):
+	header = ""
+	if idx == 0:
+		header = "1. Precip: min, frac equal to 0, mean of vals != 0, sd of values == 0"
+	elif idx == 1:
+		header = "2. Temp: mean, sd/var, p-value"
+	elif idx == 2:
+		header = "3. Daily temp min/max: mean, sd, frac of time daily temp is between min and max"
+	elif idx == 3:
+		header = "4. Relative humidity: min, max, mean, sd"
+	elif idx == 4:
+		header = "5. RH: min_mean, max_mean, min_std, max_std, frac of time avg RH is between daily min and max"
+	elif idx == 5:
+		header = "6. Approx dew point"
 	
+	return header		
 
 
 
@@ -345,7 +357,6 @@ def check_rhs(rhs_real, mean, std):
 def sigmoid(x):
 	return 1 / (1 + np.exp(-x))	
 
-
 def main():
 	
 
@@ -358,7 +369,10 @@ def main():
 	parser.add_argument('--exp_id', type=int)
 	parser.add_argument('--real_csv_dir', type=str)
 	parser.add_argument('--norms_dir', type=str)
-		
+	parser.add_argument('--save_for_panoply', type=int)
+	parser.add_argument('--n_to_save_for_panoply',type=int)
+	parser.add_argument('--for_panoply_dir', type=str)
+	
 	args = parser.parse_args()
 
 	real_data_dir = args.real_data_dir
@@ -369,16 +383,13 @@ def main():
 	exp_id = args.exp_id
 	real_csv_dir = args.real_csv_dir	
 	norms_dir = args.norms_dir
-
+	save_for_panoply = args.save_for_panoply
+	n_to_save_for_panoply = args.n_to_save_for_panoply #how many months
+	for_panoply_dir = args.for_panoply_dir
 	
 	real_csv_dir = real_csv_dir + "exp_" + str(exp_id) + "/"
 	gen_csv_dir = gen_csv_dir + "exp_" + str(exp_id) + "/"
 	
-	#test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/data_for_gan_test/MIROC5_Real/exp_18/4.pt')
-	#test_tsr = torch.load('/pic/projects/GCAM/DeepClimGAN-input/MIROC5_Tensors_norm/norm_rcp60_r1i1p1.pt')
-	#pr = np.asarray(test_tsr[1])
-	#nonzero = pr[pr < -50.0]
-	#print(nonzero)
 
 	#filename = '/pic/projects/GCAM/DeepClimGAN-input/MIROC5/rhs_day_MIROC5_rcp60_r2i1p1_21000101-21001231.nc'
 	#nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')
@@ -396,13 +407,59 @@ def main():
 	tsrs = process_tensors(gen_data_dir, exp_id, nrm)
 	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
 
+	one_month = 32 #one month = 32 days
+	n_maps = one_month * n_to_save_for_panoply
+	print("n_maps num{}".format(n_maps))
+	
+	"""
+	if save_for_panoply:
+		for_panoply_dir += "exp_" + str(exp_id) + "/"
+		pr_months = np.asarray(pr_gen[:,:, 0:n_maps])
+		tas_months = np.asarray(tas_gen[:,:,0:n_maps])
+		tasmin_months = np.asarray(tasmin_gen[:,:,0:n_maps])
+		tasmax_months = np.asarray(tasmax_gen[:,:,0:n_maps])
+		rhs_months = np.asarray(rhs_gen[:,:,0:n_maps])
+		rhsmin_months = np.asarray(rhsmin_gen[:,:,0:n_maps])
+		rhsmax_months = np.asarray(rhsmax_gen[:,:,0:n_maps])
+		print(for_panoply_dir)
+		print(rhs_months.shape)
+		print(rhsmax_months.shape)
+		np.save(for_panoply_dir + 'pr', pr_months)
+		np.save(for_panoply_dir + 'tas', tas_months)
+		np.save(for_panoply_dir + 'tasmin', tasmin_months)
+		np.save(for_panoply_dir + 'tasmax', tasmax_months)
+		np.save(for_panoply_dir + 'rhs', rhs_months)
+		np.save(for_panoply_dir + 'rhsmin', rhsmin_months)
+		np.save(for_panoply_dir + 'rhsmax', rhsmax_months)
+		return	
+	"""
+
+	
 	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm)
 	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
-	#check_pr(pr_real)
 
-	#rhs_mean, rhs_std = nrm.clmt_stats["rhs"]
-	#print(rhs_mean, rhs_std)
-	#check_rhs(rhs_real, rhs_mean, rhs_std)
+
+	if save_for_panoply:
+		for_panoply_dir += "exp_" + str(exp_id) + "/"
+		pr_months = np.asarray(pr_real[:,:, 0:n_maps])
+		tas_months = np.asarray(tas_real[:,:,0:n_maps])
+		tasmin_months = np.asarray(tasmin_real[:,:,0:n_maps])
+		tasmax_months = np.asarray(tasmax_real[:,:,0:n_maps])
+		rhs_months = np.asarray(rhs_real[:,:,0:n_maps])
+		rhsmin_months = np.asarray(rhsmin_real[:,:,0:n_maps])
+		rhsmax_months = np.asarray(rhsmax_real[:,:,0:n_maps])
+		np.save(for_panoply_dir + 'pr_real', pr_months)
+		np.save(for_panoply_dir + 'tas_real', tas_months)
+		np.save(for_panoply_dir + 'tasmin_real', tasmin_months)
+		np.save(for_panoply_dir + 'tasmax_real', tasmax_months)
+		np.save(for_panoply_dir + 'rhs_real', rhs_months)
+		np.save(for_panoply_dir + 'rhsmin_real', rhsmin_months)
+		np.save(for_panoply_dir + 'rhsmax_real', rhsmax_months)	
+		print("here")
+		return
+
+		
+
 
 	#Generated data stats
 	p_stat = get_p_stat_for_cells(pr_gen)
