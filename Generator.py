@@ -11,8 +11,9 @@ import logging
 reference: https://github.com/batsa003/videogan/blob/master/model.py
 """
 n_channels = len(clmt_vars.items())
+
 class Generator(nn.Module):
-	def __init__(self, h, w, t, ch, batch_size, z_shape):
+	def __init__(self, h, w, t, ch, batch_size, z_shape, num_smoothing_conv_layers, last_layer_size):
 		super(Generator, self).__init__()
 		
 		self.pool = pool2d()
@@ -20,7 +21,9 @@ class Generator(nn.Module):
 		self.relu2 = nn.ReLU(inplace=True)
 		self.sigm = torch.nn.Sigmoid()
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
-			
+		self.num_smoothing_conv_layers = num_smoothing_conv_layers			
+		self.last_layer_size = last_layer_size
+		
 		#block 0
 		self.fc1 = fc(z_shape, 512)
 		self.fc2 = fc(512, 4096)
@@ -56,7 +59,11 @@ class Generator(nn.Module):
 		#self.layerNorm_5 = layerNorm(n_features)
 		
 		#block 6
-		self.upconv6 = upconv3d_same(init_ctxt_channel_size+2+32, n_channels)
+		self.batchNorm5d_6 = batchNorm5d(last_layer_size)
+		#init_ctxt_channel_size + 32 + 2 = 69
+		self.upconv6 = conv3d_same(init_ctxt_channel_size+2+32, last_layer_size)
+		self.upconv6_for_smoothing = conv3d_same(last_layer_size, last_layer_size)
+		self.upconv6_final = conv3d_same(last_layer_size, n_channels)
 
 		#convolutions for the context
 		self.init1 = conv2d(init_ctxt_channel_size, 8)				
@@ -144,7 +151,13 @@ class Generator(nn.Module):
 		#x = self.relu(self.layerNorm_5(x))
 		
 		#block 6
-		out = self.upconv6(x)
+		x = self.upconv6(x)
+		if self.num_smoothing_conv_layers > 1:
+			for i in range(self.num_smoothing_conv_layers):
+				x = self.upconv6_for_smoothing(x)
+				x = self.relu(self.batchNorm5d_6(x))
+		#don't do relu and batchnorm for the last layer
+		out = self.upconv6_final(x)
 
 		keys = list(clmt_vars.keys())
 		pr_idx = keys.index('pr')		

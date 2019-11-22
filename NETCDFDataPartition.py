@@ -124,8 +124,12 @@ class NETCDFDataPartition(data.Dataset):
 		return input for D
 		"""
 
+		#print(input.shape, avg_context.shape, high_res_context.shape)
+
 		last_and_curr = torch.cat([high_res_context, input], dim=4)
+		#print("shape of last and current {}".format(last_and_curr.shape))
 		input = torch.cat([last_and_curr, avg_context], dim=1)
+		#print("shape of input for D {}".format(input.shape))
 		return input
 
 

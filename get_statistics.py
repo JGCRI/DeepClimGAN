@@ -13,10 +13,9 @@ import netCDF4 as n
 N_CELLS = len(grid_cells_for_stat)
 
 
-def process_tensors(data_path, exp_id, nrm):
+def process_tensors(data_path, exp_id, nrm, cmp_z_realizations):
 
 	clmt_var_keys = list(clmt_vars.keys())
-	data_path = data_path + "exp_" + str(exp_id) + "/"
 	tas_tsrs, tasmin_tsrs, tasmax_tsrs = [], [], []
 	rhs_tsrs, rhsmin_tsrs , rhsmax_tsrs = [], [], []
 	pr_tsrs = []
@@ -24,9 +23,11 @@ def process_tensors(data_path, exp_id, nrm):
 	for filename in os.listdir(data_path):
 		ts_name = os.path.join(data_path, filename)
 		tsr = torch.load(ts_name)
-		tsr = tsr.detach()
-		
+		tsr = tsr.detach().cpu()
+		print(tsr.shape)		
 		#Denormalize tensor
+		if cmp_z_realizations:
+			tsr = tsr[0]
 		tsr = nrm.denormalize(tsr)
 		pr_tsrs.append(tsr[clmt_var_keys.index('pr')])
 		tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
@@ -274,7 +275,7 @@ def write_stats_to_csv(stats, fname, exp_id, type):
 	with open(fname, mode='w+', newline='') as of:
 		c_writer = csv.writer(of, delimiter=',')
 		for i in range(len(stats)):
-			header = get_header(idx)
+			header = get_header(i)
 			c_writer.writerow(header)
 			c_writer.writerow(stats[i])
 			c_writer.writerow('\n')
@@ -372,6 +373,8 @@ def main():
 	parser.add_argument('--save_for_panoply', type=int)
 	parser.add_argument('--n_to_save_for_panoply',type=int)
 	parser.add_argument('--for_panoply_dir', type=str)
+	parser.add_argument('--cmp_z_realizations', type=int)
+	parser.add_argument('--cmp_z_realizations_dir', type=str)
 	
 	args = parser.parse_args()
 
@@ -386,34 +389,49 @@ def main():
 	save_for_panoply = args.save_for_panoply
 	n_to_save_for_panoply = args.n_to_save_for_panoply #how many months
 	for_panoply_dir = args.for_panoply_dir
-	
+	cmp_z_realizations = args.cmp_z_realizations
+	cmp_z_realizations_dir = args.cmp_z_realizations_dir	
+
+
 	real_csv_dir = real_csv_dir + "exp_" + str(exp_id) + "/"
 	gen_csv_dir = gen_csv_dir + "exp_" + str(exp_id) + "/"
 	
 
-	#filename = '/pic/projects/GCAM/DeepClimGAN-input/MIROC5/rhs_day_MIROC5_rcp60_r2i1p1_21000101-21001231.nc'
-	#nc = n.Dataset(filename, 'r', format='NETCDF4_CLASSIC')
-	#var = nc.variables['rhs'][:]
-	#pr = np.asarray(var)
-	#pr = pr[pr > 100]
-	#print(len(pr), np.max(pr))
-
-
 	
 	nrm = Normalizer()
 	nrm.load_means_and_stds(norms_dir)
-	
-	
-	tsrs = process_tensors(gen_data_dir, exp_id, nrm)
+		
+	if cmp_z_realizations:
+		gen_data_dir = cmp_z_realizations_dir + "exp_" + str(exp_id) + "/gen/" 
+		real_data_dir = cmp_z_realizations_dir + "exp_" + str(exp_id) + "/real/"
+	else:
+		gen_data_dir = gen_data_dir + "exp_" + str(exp_id) + "/"
+		real_data_dir = real_data_dir + "exp_" + str(exp_id) + "/"
+
+	print(gen_data_dir, real_data_dir)	
+	tsrs = process_tensors(gen_data_dir, exp_id, nrm, cmp_z_realizations)
 	pr_gen, tas_gen, tasmin_gen, tasmax_gen, rhs_gen, rhsmin_gen, rhsmax_gen = merge_tensors(tsrs)	
+
+
+	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm, cmp_z_realizations)
+	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
+	
+		
 
 	one_month = 32 #one month = 32 days
 	n_maps = one_month * n_to_save_for_panoply
 	print("n_maps num{}".format(n_maps))
-	
-	"""
+	panoply_dir = for_panoply_dir	
+
+
+
+
 	if save_for_panoply:
-		for_panoply_dir += "exp_" + str(exp_id) + "/"
+		#save gen
+		if cmp_z_realizations:
+			for_panoply_dir = panoply_dir + "exp_" + str(exp_id) + "/z_realizations/gen/" 
+		else:
+			for_panoply_dir = panoply_dir + "exp_" + str(exp_id) + "/gen/"
 		pr_months = np.asarray(pr_gen[:,:, 0:n_maps])
 		tas_months = np.asarray(tas_gen[:,:,0:n_maps])
 		tasmin_months = np.asarray(tasmin_gen[:,:,0:n_maps])
@@ -421,9 +439,6 @@ def main():
 		rhs_months = np.asarray(rhs_gen[:,:,0:n_maps])
 		rhsmin_months = np.asarray(rhsmin_gen[:,:,0:n_maps])
 		rhsmax_months = np.asarray(rhsmax_gen[:,:,0:n_maps])
-		print(for_panoply_dir)
-		print(rhs_months.shape)
-		print(rhsmax_months.shape)
 		np.save(for_panoply_dir + 'pr', pr_months)
 		np.save(for_panoply_dir + 'tas', tas_months)
 		np.save(for_panoply_dir + 'tasmin', tasmin_months)
@@ -431,16 +446,14 @@ def main():
 		np.save(for_panoply_dir + 'rhs', rhs_months)
 		np.save(for_panoply_dir + 'rhsmin', rhsmin_months)
 		np.save(for_panoply_dir + 'rhsmax', rhsmax_months)
-		return	
-	"""
-
+ 
 	
-	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm)
-	pr_real, tas_real, tasmin_real, tasmax_real, rhs_real, rhsmin_real, rhsmax_real = merge_tensors(real_tsrs)
+		#save real
+		if cmp_z_realizations:
+			for_panoply_dir	= panoply_dir +	"exp_" + str(exp_id) + "/z_realizations/real/"
+		else:
+			for_panoply_dir = panoply_dir + "exp_" + str(exp_id) + "/real/"
 
-
-	if save_for_panoply:
-		for_panoply_dir += "exp_" + str(exp_id) + "/"
 		pr_months = np.asarray(pr_real[:,:, 0:n_maps])
 		tas_months = np.asarray(tas_real[:,:,0:n_maps])
 		tasmin_months = np.asarray(tasmin_real[:,:,0:n_maps])
@@ -455,9 +468,7 @@ def main():
 		np.save(for_panoply_dir + 'rhs_real', rhs_months)
 		np.save(for_panoply_dir + 'rhsmin_real', rhsmin_months)
 		np.save(for_panoply_dir + 'rhsmax_real', rhsmax_months)	
-		print("here")
 		return
-
 		
 
 

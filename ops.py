@@ -6,7 +6,7 @@ def conv3d(in_channels, out_channels, kernel_size = 4, stride = 2, padding = 1):
 def upconv3d(in_channels, out_channels, kernel_size = 4, stride = 2, padding = 1):
 	return nn.ConvTranspose3d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, bias = True)
 
-def upconv3d_same(in_channels, out_channels, kernel_size=3, stride = 1, padding = 1):
+def conv3d_same(in_channels, out_channels, kernel_size=3, stride = 1, padding = 1):
 	return nn.Conv3d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding)
 
 

@@ -35,13 +35,8 @@ class Discriminator(nn.Module):
 		out = self.model(x)
 		b, h, w, t, ch = out.shape
 		out = out.view(b, h * w * t * ch)		
-		output = self.fc3(out)
+		lin = self.fc3(out)
+		return lin
 		#lin1 = self.fc1(out)
-		#output = self.sigmoid(lin1)
-		#output = lin1
-		#output = self.encoder(lin1)
-		#if self.autoencoder:
-		#	output = self.encoder(lin1)
-		#	return output
-		#output = self.sigmoid(self.fc2(lin1))
-		return output
+		#lin2 = self.fc2(lin1)
+		#return lin2

@@ -22,8 +22,8 @@ import argparse
 import logging
 import csv
 
-exp_id = 41
-ex = Experiment('Exp 41: Pre-Training GAN as Autoencoder  saving model after 500 updates, z = 256')
+exp_id = 55
+ex = Experiment('Exp 55: Pre-Training GAN as Autoencoder  saving model after 500 updates, z = 256')
 
 #MongoDB
 DATABASE_URL = "172.18.65.219:27017"
@@ -52,7 +52,7 @@ class TrainerSequential:
     @ex.capture
     def __init__(self):
         self.lon, self.lat, self.context_length, self.channels,  self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-        self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder, self.z_shape  = self.set_hyperparameters()
+        self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size  = self.set_hyperparameters()
         self.exp_id, self.exp_name, self._run = self.get_exp_info()
         #buffer for expereince replay        
         self.replay_buffer = []
@@ -66,8 +66,8 @@ class TrainerSequential:
         return lon, lat, context_length, channels,n_days, apply_norm, data_dir
     
     @ex.capture
-    def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape):
-        return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape
+    def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape, num_smoothing_conv_layers,last_layer_size):
+        return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape, num_smoothing_conv_layers, last_layer_size
     
     @ex.capture
     def get_exp_info(self, _run):
@@ -85,7 +85,7 @@ class TrainerSequential:
         netD = Discriminator(self.label_smoothing, self.is_autoencoder, self.z_shape)
         netD.apply(ut.weights_init)
         
-        netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size, self.z_shape)        
+        netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size)        
         
         if not self.pretrain:
             params = torch.load(self.save_model + "model.pt")
@@ -109,8 +109,6 @@ class TrainerSequential:
         netD.to(device)
         netG.to(device)
         
-        logging.info("here")
-
         #reset the batch size based on the number of processes used
         self.total_batch_size  = self.batch_size        
         self.actual_batch_size = 2 # WARNING: DON'T HARDCODE THIS   #self.batch_size // comm_size
@@ -141,7 +139,6 @@ class TrainerSequential:
         #Training loop
         for current_epoch in range(1, self.num_epoch + 1):        
             n_updates = 1
-            logging.info("here")
             D_epoch_loss, G_epoch_loss = 0, 0
 
             while True:
@@ -185,8 +182,15 @@ class TrainerSequential:
                 high_res_contexts = torch.chunk(high_res_context,self.num_workers)
                 fake_outputs = []
                 if self.is_autoencoder:
+                    d_grad = ut.save_grads(netD, "Discriminator")
+       	       	    logging.info("D gradients: {}, {}".format(d_grad, n_updates))
+
+       	       	    g_grad = ut.save_grads(netG, "Generator")
+       	       	    logging.info("G gradients: {}, {}".format(g_grad, n_updates))
+
                     netG.zero_grad()
                     netD.zero_grad()
+
                     for worker in range(self.num_workers):
                         input = ds.build_input_for_D(current_months[worker], avg_contexts[worker], high_res_contexts[worker])            
                         outputs = netD(input).squeeze()
@@ -472,6 +476,9 @@ if __name__ == "__main__":
     parser.add_argument('--save_model_dir', type=str)
     parser.add_argument('--is_autoencoder', type=int)
     parser.add_argument('--z_shape', type=int)
+    parser.add_argument('--num_smoothing_conv_layers', type=int)
+    parser.add_argument('--last_layer_size',type=int)  
+
 
     args = parser.parse_args()
 
@@ -488,6 +495,8 @@ if __name__ == "__main__":
     save_model_dir = args.save_model_dir
     is_autoencoder = args.is_autoencoder
     z_shape = args.z_shape
+    num_smoothing_conv_layers=args.num_smoothing_conv_layers
+    last_layer_size=args.last_layer_size
     
     ex.add_config(
         num_epoch=num_epoch,
@@ -502,6 +511,8 @@ if __name__ == "__main__":
         pretrain=pretrain,
         save_model_dir=save_model_dir,
         is_autoencoder=is_autoencoder,
-        z_shape=z_shape)
+        z_shape=z_shape,
+        num_smoothing_conv_layers=num_smoothing_conv_layers,
+        last_layer_size=last_layer_size)
     
     ex.run()
