@@ -4,7 +4,8 @@ import os
 import sys
 from NETCDFDataPartition import NETCDFDataPartition
 from Discriminator import Discriminator
-from Generator import Generator
+#from Generator import Generator
+from Generator_alt import Generator
 from Normalizer import Normalizer
 import torch
 import torch.nn as nn
@@ -22,8 +23,8 @@ import argparse
 import logging
 import csv
 
-exp_id = 55
-ex = Experiment('Testing the gradients')
+exp_id = 63
+ex = Experiment('Exp 63, Training with new config, z = 100')
 
 
 #MongoDB
@@ -85,12 +86,17 @@ class TrainerAdversar:
         #build models
         netD = Discriminator(self.label_smoothing, self.is_autoencoder, self.z_shape)
         netD.apply(ut.weights_init)
+       
+        channels = 4 
+        netG = Generator(self.lon, self.lat, self.context_length, channels, self.batch_size, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size)        
         
-        netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size)        
-        
-        params = torch.load(self.pretrained_model + "model.pt")
-        netG.load_state_dict(params)
+        paramsG = torch.load(self.pretrained_model + "netG.pt")
+        netG.load_state_dict(paramsG)
+  
         #netG.apply(ut.weights_init)
+        #paramsD = torch.load(self.pretrained_model + "netD.pt")
+        #netD.load_state_dict(paramsD)
+
 
         #create optimizers
         loss_func = torch.nn.BCEWithLogitsLoss()
@@ -126,7 +132,7 @@ class TrainerAdversar:
         partition = partition[:len(partition)//2]#warning take just a half of a data
         #partition = partition[:2]
         logging.info("partition {}".format(partition))
-        ds = NETCDFDataPartition(partition, self.data_dir)
+        ds = NETCDFDataPartition(partition, self.data_dir, self.lat,self.lon,2,device0) # 2 for number of channels in low-res context
         logging.info("finished loading partition")
          
         if n_generate_for_one_z > 0:
@@ -161,6 +167,9 @@ class TrainerAdversar:
                 #unwrap the batch            
                 current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
                 current_month_to_save = current_month
+
+                current_month = current_month[:,0:4,:,:,:]
+                high_res_context = high_res_context[:,0:4,:,:,:]
         
                 if self.label_smoothing:
                     ts = np.full((self.total_batch_size), 0.9)
@@ -222,17 +231,16 @@ class TrainerAdversar:
                         real_labelss[worker] = real_labelss[worker].to(device0)
                         fake_labelss[worker] = fake_labelss[worker].to(device0)
 	
-
-                        			
-                        input = ds.build_input_for_D(current_months[worker], avg_contexts[worker], high_res_contexts[worker])
+                        #feed real and real			
+                        input = ds.build_input_for_D(current_months[worker], current_months[worker], avg_contexts[worker], high_res_contexts[worker])
                     
                         #1A. Train D on real
                         outputs = netD(input).squeeze()
                         d_real_loss = loss_func(outputs, real_labelss[worker])
-                    
+                        logging.info("real loss: {}".format(d_real_loss.item()))                   
                         #report d_real_loss
                         self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates)
-
+ 
                         #1B. Train D on fake
                         high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
                         fake_inputs = netG(z[worker].to(device1), avg_ctxt_for_G.to(device1), high_res_for_G.to(device1))
@@ -240,7 +248,8 @@ class TrainerAdversar:
                         if self.add_noise:
                             fake_inputs = self.noise(fake_inputs)
        
-                        fake_input_with_ctxt = ds.build_input_for_D(fake_inputs.to(device0), avg_contexts[worker].to(device0), high_res_contexts[worker].to(device0))
+                        #feed fake and real
+                        fake_input_with_ctxt = ds.build_input_for_D(fake_inputs.to(device0), current_months[worker], avg_contexts[worker].to(device0), high_res_contexts[worker].to(device0))
                         D_input = fake_input_with_ctxt
 
                         #feed fake input augmented with the context to D
@@ -260,7 +269,7 @@ class TrainerAdversar:
                         outputs = netD(D_input.detach()).squeeze()
                         d_fake_loss = loss_func(outputs, fake_labelss[worker])
                         self._run.log_scalar('d_fake_loss', d_fake_loss.item(), n_updates)
-                        
+                        logging.info("fake loss: {}".format(d_fake_loss.item()))
                         #Add the gradients from the all-real and all-fake batches    
                         d_loss = d_real_loss + d_fake_loss
 
@@ -309,12 +318,11 @@ class TrainerAdversar:
                     netG.zero_grad()
                     
                     for worker in range(self.num_workers):
-                        #ship  to gpu 0 for G
                         avg_contexts[worker] = avg_contexts[worker].to(device1)
                         high_res_contexts[worker] = high_res_contexts[worker].to(device1)
                         real_labelss[worker] = real_labelss[worker].to(device0)
                         z[worker] = z[worker].to(device1)
-
+                        current_months[worker] = current_months[worker].to(device0)
 
                         high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
                         g_outputs_fake = netG(z[worker], avg_ctxt_for_G, high_res_for_G)
@@ -323,7 +331,9 @@ class TrainerAdversar:
                         g_outputs_fake = g_outputs_fake.to(device0)
                         avg_contexts[worker] = avg_contexts[worker].to(device0)
                         high_res_contexts[worker] = high_res_contexts[worker].to(device0)
-                        d_input = ds.build_input_for_D(g_outputs_fake, avg_contexts[worker], high_res_contexts[worker])
+           
+                        #feed fake and real
+                        d_input = ds.build_input_for_D(g_outputs_fake, current_months[worker], avg_contexts[worker], high_res_contexts[worker])
                         outputs = netD(d_input).squeeze()
                         g_loss = loss_func(outputs, real_labelss[worker])#compute loss for G
                         g_loss.backward()

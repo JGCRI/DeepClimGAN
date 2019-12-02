@@ -3,7 +3,8 @@ import os
 import sys
 from NETCDFDataPartition import NETCDFDataPartition
 from Discriminator import Discriminator
-from Generator import Generator
+#from Generator import Generator
+from Generator_alt import Generator
 from Normalizer import Normalizer
 import torch
 import torch.nn as nn
@@ -22,8 +23,9 @@ import argparse
 import logging
 import csv
 
-exp_id = 55
-ex = Experiment('Exp 55: Pre-Training GAN as Autoencoder  saving model after 500 updates, z = 256')
+exp_id = 58
+ex = Experiment('Exp 58: Pre-Training G saving model after 500 updates, z = 128')
+
 
 #MongoDB
 DATABASE_URL = "172.18.65.219:27017"
@@ -123,8 +125,9 @@ class TrainerSequential:
         rank = 0
         partition = self.partition[rank] #WARNING: testing using just 3 files from a dataset
         partition = partition[:len(partition)//2]#warning take just a half of a data
+        #partition = partition[:2]
         logging.info("partition {}".format(partition))
-        ds = NETCDFDataPartition(partition, self.data_dir)
+        ds = NETCDFDataPartition(partition, self.data_dir,self.lat,self.lon,2,device) # 2 for number of channels in low-res context
         logging.info("finished loading partition")
         sampler = DataSampler(self.total_batch_size, ds.data, self.context_length, self.n_days)
         b_sampler = data.BatchSampler(sampler, batch_size=self.total_batch_size, drop_last=True)
@@ -154,6 +157,12 @@ class TrainerSequential:
 
                 #unwrap the batch            
                 current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
+                #since we are loading saved tensors, we don't need rhs, rhsmin, rhsmax now. So, from current month and high_res_ctxt select only [0:4) features
+                current_month = current_month[:,0:4,:,:,:]
+                high_res_context = high_res_context[:,0:4,:,:,:]
+                print("curr month and high res ctxt shapes {}".format(current_month.shape, high_res_context.shape))
+
+		
                 current_month_to_save = current_month
         
                 if self.label_smoothing:
@@ -181,6 +190,7 @@ class TrainerSequential:
                 avg_contexts = torch.chunk(avg_context,self.num_workers)
                 high_res_contexts = torch.chunk(high_res_context,self.num_workers)
                 fake_outputs = []
+                z = torch.chunk(z, self.num_workers)
                 if self.is_autoencoder:
                     d_grad = ut.save_grads(netD, "Discriminator")
        	       	    logging.info("D gradients: {}, {}".format(d_grad, n_updates))
@@ -192,7 +202,7 @@ class TrainerSequential:
                     netD.zero_grad()
 
                     for worker in range(self.num_workers):
-                        input = ds.build_input_for_D(current_months[worker], avg_contexts[worker], high_res_contexts[worker])            
+                        input = ds.build_input_for_D(current_months[worker], current_months[worker], avg_contexts[worker], high_res_contexts[worker])            
                         outputs = netD(input).squeeze()
                         high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
                         generated_month = netG(outputs, avg_ctxt_for_G, high_res_for_G)
@@ -210,9 +220,10 @@ class TrainerSequential:
                     netG.zero_grad()
                     for worker in range(self.num_workers):
                         high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
-                        fake_outputs = netG(z, avg_ctxt_for_G, high_res_for_G)    
-                        losses = pretrain_G(fake_outputs, current_months[worker], mse_loss_func, 1, device) # WARNING: comm_size hardcoded to 1
-                        log_losses(self._run, losses, n_updates)
+                        fake_outputs = netG(z[worker], avg_ctxt_for_G, high_res_for_G)    
+                        comm_size = self.num_workers	
+                        losses = pretrain_G(fake_outputs, current_months[worker], mse_loss_func, comm_size, device) # WARNING: comm_size hardcoded to 1
+                        #log_losses(self._run, losses, n_updates)
                         loss = losses["total_loss"]
                         total_loss = loss[0]
                         logging.info("epoch {}, rank {}, update {}, g loss {:0.18f}".format(current_epoch, 0, n_updates, total_loss.item())) # WARNING: rank hardcoded to 0
@@ -222,8 +233,8 @@ class TrainerSequential:
                     
                 if self.pretrain or self.is_autoencoder:
                     if n_updates == self.save_gen_data_update:
-                        save_model(netG, self.save_model)
-                    
+                        save_model(netG, self.save_model, "netG")
+                        save_model(netD, self.save_model, "netD")               
                     
                     #save real data to calculate statistics
                     if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
@@ -283,30 +294,34 @@ def pretrain_G(fake_outputs, current_month_batch, mse_loss_func, comm_size, devi
     loss_mean_1 = mse_loss_func(map_mean_target[1], batch_fake_outputs_mean[1])
     loss_mean_2 = mse_loss_func(map_mean_target[2], batch_fake_outputs_mean[2])
     loss_mean_3 = mse_loss_func(map_mean_target[3], batch_fake_outputs_mean[3])
-    loss_mean_4 = mse_loss_func(map_mean_target[4], batch_fake_outputs_mean[4])
-    loss_mean_5 = mse_loss_func(map_mean_target[5], batch_fake_outputs_mean[5])
-    loss_mean_6 = mse_loss_func(map_mean_target[6], batch_fake_outputs_mean[6])
+    #loss_mean_4 = mse_loss_func(map_mean_target[4], batch_fake_outputs_mean[4])
+    #loss_mean_5 = mse_loss_func(map_mean_target[5], batch_fake_outputs_mean[5])
+    #loss_mean_6 = mse_loss_func(map_mean_target[6], batch_fake_outputs_mean[6])
     
-    total_loss = loss_mean_0 + loss_mean_1 + loss_mean_2 + loss_mean_3 + loss_mean_4 + loss_mean_5 + loss_mean_6
+    #total_loss = loss_mean_0 + loss_mean_1 + loss_mean_2 + loss_mean_3 + loss_mean_4 + loss_mean_5 + loss_mean_6
+    total_loss = loss_mean_0 + loss_mean_1 + loss_mean_2 + loss_mean_3
 
     #compute losses for stds for each channel
     loss_std_0 = mse_loss_func(map_std_target[0], batch_fake_outputs_std[0])
     loss_std_1 = mse_loss_func(map_std_target[1], batch_fake_outputs_std[1])
     loss_std_2 = mse_loss_func(map_std_target[2], batch_fake_outputs_std[2])
     loss_std_3 = mse_loss_func(map_std_target[3], batch_fake_outputs_std[3])
-    loss_std_4 = mse_loss_func(map_std_target[4], batch_fake_outputs_std[4])
-    loss_std_5 = mse_loss_func(map_std_target[5], batch_fake_outputs_std[5])
-    loss_std_6 = mse_loss_func(map_std_target[6], batch_fake_outputs_std[6])
+    #loss_std_4 = mse_loss_func(map_std_target[4], batch_fake_outputs_std[4])
+    #loss_std_5 = mse_loss_func(map_std_target[5], batch_fake_outputs_std[5])
+    #loss_std_6 = mse_loss_func(map_std_target[6], batch_fake_outputs_std[6])
 
-    total_loss += loss_std_0 + loss_std_1 + loss_std_2 + loss_std_3 + loss_std_4 + loss_std_5 + loss_std_6
-
+    #total_loss += loss_std_0 + loss_std_1 + loss_std_2 + loss_std_3 + loss_std_4 + loss_std_5 + loss_std_6
+    total_loss += loss_std_0 + loss_std_1 + loss_std_2 + loss_std_3
     tas_loss, rhs_loss = reg_rh_and_tas(fake_outputs, device)
-    total_loss += tas_loss + rhs_loss
-        
+    #total_loss += tas_loss + rhs_loss
+    total_loss += tas_loss     
+    loss_mean_4 = loss_mean_5 = loss_mean_6 = 0
+    loss_std_4 = loss_std_5 = loss_std_6 = 0   
+
     loss = {
         "mean_losses" : [loss_mean_0, loss_mean_1, loss_mean_2, loss_mean_3, loss_mean_4, loss_mean_5, loss_mean_6],
         "std_losses" : [loss_std_0, loss_std_1, loss_std_2, loss_std_3, loss_std_4, loss_std_5, loss_std_6],
-        "rhs_loss" : [rhs_loss],
+        #"rhs_loss" : [rhs_loss],
         "tas_loss" : [tas_loss],
         "total_loss" : [total_loss]
     }
@@ -321,8 +336,9 @@ def get_mean_map(batch, comm_size):
     tsr = tsr.view(n_channels, 128,256,32 * bsz) #7 x 128 x 256 x bsz*32
     #sum along days dimension
     sum_tsr = tsr.sum(-1)
-    all_reduce_sum(sum_tsr)
-    mean_tsr = sum_tsr / (bsz * 32 * comm_size)
+    #all_reduce_sum(sum_tsr)
+    mean_tsr = sum_tsr / (bsz * 32)
+    #mean_tsr = sum_tsr / (bsz * 32 * comm_size)
     return mean_tsr
     
 def get_mean_map_for_fake(batch):
@@ -343,7 +359,7 @@ def get_std_map_for_fake(batch):
     sum_tsr = tsr.sum(-1)
     mean_tsr = sum_tsr / N
     mean_tsr.unsqueeze_(-1)#7 x 128 x 256 x 1
-    mean_tsr = mean_tsr.expand(7, 128, 256, N)
+    mean_tsr = mean_tsr.expand(4, 128, 256, N)
 
     #calc sq diff on current batch on the process
     sq_diff = ((tsr - mean_tsr) ** 2).sum(-1)
@@ -360,15 +376,17 @@ def get_std_map(batch, comm_size):
     #sum along days in the batch on the current process
     sum_tsr = tsr.sum(-1)
     #summ along days in the batch on all the processes
-    all_reduce_sum(sum_tsr)
-    mean_tsr = sum_tsr / (N * comm_size)
+    #all_reduce_sum(sum_tsr)
+    mean_tsr = sum_tsr / N
+    #mean_tsr = sum_tsr / (N * comm_size)
     mean_tsr.unsqueeze_(-1)#7 x 128 x 256 x 1
-    mean_tsr = mean_tsr.expand(7, 128, 256, N) #7 x 128 x 256 x 64
+    mean_tsr = mean_tsr.expand(4, 128, 256, N) #4 x 128 x 256 x 64
     #calc sq diff on current batch on the process and sum them up along days dimension
     sq_diff = ((tsr - mean_tsr) ** 2).sum(-1)
     #calc sq diffs for all the tensors
-    all_reduce_sum(sq_diff)
-    std_tsr = torch.sqrt(sq_diff / (N * comm_size))
+    #all_reduce_sum(sq_diff)
+    std_tsr = torch.sqrt(sq_diff / N)
+    #std_tsr = torch.sqrt(sq_diff / (N * comm_size))
     return std_tsr
 
 def reg_rh_and_tas(batch, device):
@@ -382,9 +400,9 @@ def reg_rh_and_tas(batch, device):
     tasmin = tsr[keys.index('tasmin')]
     tasmax = tsr[keys.index('tasmax')]
 
-    rhs = tsr[keys.index('rhs')]
-    rhsmin = tsr[keys.index('rhsmin')]
-    rhsmax = tsr[keys.index('rhsmax')]
+    #rhs = tsr[keys.index('rhs')]
+    #rhsmin = tsr[keys.index('rhsmin')]
+    #rhsmax = tsr[keys.index('rhsmax')]
 
     #filter tasmin and tasmax
     tas_diff_1 = tas - tasmin
@@ -401,21 +419,22 @@ def reg_rh_and_tas(batch, device):
     tas_loss = (tasmin_sq_sum + tasmax_sq_sum) / (N * 128 * 256)    
     
     #filter rhsmin and rhsmax
-    rhsdiff = rhs - rhsmin
-    notinrange_rhs_1 = rhsdiff[rhsdiff < 0]
-    rhsmin_sq_sum = torch.sum((notinrange_rhs_1 ** 2))
-    rhsdiff = rhs - rhsmax
-    notinrange_rhs_2 = rhsdiff[rhsdiff > 0]
-    rhsmax_sq_sum = torch.sum((notinrange_rhs_2 ** 2))
-    rhs_loss = (rhsmin_sq_sum + rhsmax_sq_sum) / (N * 128 * 256)
+    #rhsdiff = rhs - rhsmin
+    #notinrange_rhs_1 = rhsdiff[rhsdiff < 0]
+    #rhsmin_sq_sum = torch.sum((notinrange_rhs_1 ** 2))
+    #rhsdiff = rhs - rhsmax
+    #notinrange_rhs_2 = rhsdiff[rhsdiff > 0]
+    #rhsmax_sq_sum = torch.sum((notinrange_rhs_2 ** 2))
+    #rhs_loss = (rhsmin_sq_sum + rhsmax_sq_sum) / (N * 128 * 256)
     #logging.info("tas_loss {}, rhs_loss {}".format(tas_loss, rhs_loss))
+    rhs_loss = 0
     return tas_loss, rhs_loss
 
 
     
-def save_model(netG, dir):
+def save_model(netG, dir, model_name):
     logging.info("saving the model")
-    torch.save(netG.state_dict(), dir + 'model.pt')
+    torch.save(netG.state_dict(), dir + model_name + '.pt')
     return
 
 

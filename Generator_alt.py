@@ -15,7 +15,6 @@ n_channels = len(clmt_vars.items())
 class Generator(nn.Module):
 	def __init__(self, h, w, t, ch, batch_size, z_shape, num_smoothing_conv_layers, last_layer_size):
 		super(Generator, self).__init__()
-		
 		self.pool = pool2d()
 		self.relu = relu()
 		self.relu2 = nn.ReLU(inplace=True)
@@ -23,37 +22,38 @@ class Generator(nn.Module):
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
 		self.num_smoothing_conv_layers = num_smoothing_conv_layers			
 		self.last_layer_size = last_layer_size
+		self.upsample = upsample_layer(2)#scale factor is 2
 		
 		#block 0
 		self.fc1 = fc(z_shape, 512)
 		self.fc2 = fc(512, 4096)
 		
 		#block 1
-		self.upconv1 = upconv3d(128, 512)
+		self.conv1 = conv3d_same(128, 512)
 		n_features = 512 + 64 + 32
 		self.batchNorm5d_1 = batchNorm5d(n_features)
 		#self.layerNorm_1 = layerNorm(n_features)
 		
 		#block 2
-		self.upconv2 = upconv3d(512+64+32, 256)
+		self.conv2 = conv3d_same(512+64+32, 256)
 		n_features = 256 + 32 + 16
 		self.batchNorm5d_2 = batchNorm5d(n_features)
 		#self.layerNorm_2 = layerNorm(n_features)
 		
 		#block 3
-		self.upconv3 = upconv3d(256+16+32, 128)
+		self.conv3 = conv3d_same(256+16+32, 128)
 		n_features = 128 + 16 + 8
 		self.batchNorm5d_3 = batchNorm5d(n_features)
 		#self.layerNorm_3 = layerNorm(n_features)
 
 		#block 4
-		self.upconv4 = upconv3d(128+16+8, 64)
+		self.conv4 = conv3d_same(128+16+8, 64)
 		n_features = 64 + 8 + 4
 		self.batchNorm5d_4 = batchNorm5d(n_features)
 		#self.layerNorm_4 = layerNorm(n_features)
 		
 		#block 5
-		self.upconv5 = upconv3d(64+8+4, 32)
+		self.conv5 = conv3d_same(64+8+4, 32)
 		n_features = 32 + 2 + init_ctxt_channel_size
 		self.batchNorm5d_5 = batchNorm5d(32+2+init_ctxt_channel_size)
 		#self.layerNorm_5 = layerNorm(n_features)
@@ -72,7 +72,6 @@ class Generator(nn.Module):
 		self.conv8_16 = conv2d(8, 16)
 		self.conv16_32 = conv2d(16, 32)
 		self.conv32_64 = conv2d(32, 64)
-
 
 
 	def get_init_channel_size(self, t, ch):
@@ -95,7 +94,7 @@ class Generator(nn.Module):
 		x = fc2.reshape(batch_size, 128, 4, 8, 1)
 				
 		#block 1
-		x = self.upconv1(x)
+		x = self.conv1(self.upsample(x))
 		rep_factor = x.shape[-1] #time dimension of x, we should make contexts to match this size
 		init1 = self.pool(self.conv32_64(self.pool(self.conv16_32(self.pool(self.conv8_16(self.pool(self.init1(high_res_context))))))))
 		init1 = init1.unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)
@@ -107,7 +106,7 @@ class Generator(nn.Module):
 		
 		
 		#block 2
-		x = self.upconv2(x)
+		x = self.conv2(self.upsample(x))
 		rep_factor = x.shape[-1]
 		init2 = self.pool(self.conv16_32(self.pool(self.conv8_16(self.pool(self.init1(high_res_context))))))
 		init2 = init2.unsqueeze(-1).repeat(1,1,1,1, rep_factor)
@@ -118,7 +117,7 @@ class Generator(nn.Module):
 		#x = self.relu(self.layerNorm_2(x))
 		
 		#block3
-		x = self.upconv3(x)
+		x = self.conv3(self.upsample(x))
 		rep_factor = x.shape[-1]
 		init3 = self.pool(self.conv8_16(self.pool(self.init1(high_res_context)))) 
 		init3 = init3.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
@@ -130,7 +129,7 @@ class Generator(nn.Module):
 
 
 		#block4
-		x = self.upconv4(x)
+		x = self.conv4(self.upsample(x))
 		rep_factor = x.shape[-1]
 		init4 = self.pool(self.init1(high_res_context)) 
 		init4 = init4.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
@@ -142,7 +141,7 @@ class Generator(nn.Module):
 
 	
 		#block5
-		x = self.upconv5(x)
+		x = self.conv5(self.upsample(x))
 		rep_factor = x.shape[-1]
 		init5 = high_res_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		avg5 = avg_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
@@ -171,18 +170,20 @@ class Generator(nn.Module):
 
 		#apply activation functions per channels: pr -> relu, rhsmin -> sigmoid
 		out[:,pr_idx] = self.relu2(out[:,pr_idx].clone())
-		#out[:,rhsmin_idx] = self.sigm(out[:,rhsmin_idx].clone())
+		#out[:,rhsmin_idx] = self.sigm(out[:,rhsmin_idx].clone()) #MAYBE LATER
 
 
 		#apply reparametrization
 		out[:,tas_idx] = out[:,tasmin_idx] + torch.exp(out[:,tas_idx].clone())
 		out[:,tasmax_idx] = out[:,tas_idx] + torch.exp(out[:,tasmax_idx].clone())
 		
+		"""
 		#first update daily avg rhs
-		#out[:,rhs_idx] = self.sigm(out[:,rhsmin_idx] + torch.exp(out[:,rhs_idx].clone()))
+		out[:,rhs_idx] = self.sigm(out[:,rhsmin_idx] + torch.exp(out[:,rhs_idx].clone())) #MAYBE LATER
 		
 		#then use it to update max rhs
-		#out[:,rhsmax_idx] = self.sigm(out[:,rhs_idx] + torch.exp(out[:,rhsmax_idx].clone()))
+		out[:,rhsmax_idx] = self.sigm(out[:,rhs_idx] + torch.exp(out[:,rhsmax_idx].clone()) #MAYBE LATER
+		"""
 
 		return out
 

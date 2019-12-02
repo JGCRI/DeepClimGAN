@@ -1,7 +1,7 @@
 
 scenarios = ["rcp26", "rcp45", "rcp60", "rcp85", "historical"]
 realizations = ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1"]
-#[lat, lon]
+n_channels_in_diff_vct = 2
 
 grid_cells_for_stat = {
 	"ocean_high" : [118,19],#Barents sea
@@ -27,10 +27,10 @@ clmt_vars = {
 	'pr' : [pr_day_dir,'log_norm'],
 	'tas' : [tas_day_dir,'stand'],
 	'tasmin' : [tas_min_dir,'stand'],
-	'tasmax' : [tas_max_dir,'stand'],
-	'rhsmin' : [rhs_min_dir,''],
-	'rhsmax' : [rhs_max_dir,''],
-	'rhs' : [rhs_day_dir,'']
+	'tasmax' : [tas_max_dir,'stand']
+#	'rhsmin' : [rhs_min_dir,''],
+#	'rhsmax' : [rhs_max_dir,''],
+#	'rhs' : [rhs_day_dir,'']
 }
 
 
