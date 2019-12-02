@@ -159,7 +159,7 @@ class NETCDFDataPartition(data.Dataset):
 		size_to_expand = last_and_curr.shape[-1]
 		expanded_diff = torch.cat([diff.unsqueeze(-1)]*size_to_expand,dim=4)		
 		input = torch.cat([last_and_curr, avg_context], dim=1)
-		#input = torch.cat([input, expanded_diff], dim=1)
+		input = torch.cat([input, expanded_diff], dim=1)
 		return input
 
 
