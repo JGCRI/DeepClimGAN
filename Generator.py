@@ -13,7 +13,7 @@ reference: https://github.com/batsa003/videogan/blob/master/model.py
 n_channels = len(clmt_vars.items())
 
 class Generator(nn.Module):
-	def __init__(self, h, w, t, ch, batch_size, z_shape, num_smoothing_conv_layers, last_layer_size):
+	def __init__(self, h, w, t, ch, batch_size, z_shape,  last_layer_size):
 		super(Generator, self).__init__()
 		
 		self.pool = pool2d()
@@ -21,7 +21,6 @@ class Generator(nn.Module):
 		self.relu2 = nn.ReLU(inplace=True)
 		self.sigm = torch.nn.Sigmoid()
 		init_ctxt_channel_size = self.get_init_channel_size(t, ch)
-		self.num_smoothing_conv_layers = num_smoothing_conv_layers			
 		self.last_layer_size = last_layer_size
 		
 		#block 0
@@ -153,25 +152,19 @@ class Generator(nn.Module):
 		#block 6
 		x = self.upconv6(x)
 		out = x
-		if self.num_smoothing_conv_layers > 1:
-			for i in range(self.num_smoothing_conv_layers):
-				x = self.upconv6_for_smoothing(x)
-				x = self.relu(self.batchNorm5d_6(x))
-		#don't do relu and batchnorm for the last layer
-		#out = self.upconv6_final(x)
 
 		keys = list(clmt_vars.keys())
 		pr_idx = keys.index('pr')		
 		tas_idx = keys.index('tas')
 		tasmin_idx = keys.index('tasmin')
 		tasmax_idx = keys.index('tasmax')
-		#rhs_idx = keys.index('rhs')
-		#rhsmin_idx = keys.index('rhsmin')
-		#rhsmax_idx = keys.index('rhsmax')
+		rhs_idx = keys.index('rhs')
+		rhsmin_idx = keys.index('rhsmin')
+		rhsmax_idx = keys.index('rhsmax')
 
 		#apply activation functions per channels: pr -> relu, rhsmin -> sigmoid
 		out[:,pr_idx] = self.relu2(out[:,pr_idx].clone())
-		#out[:,rhsmin_idx] = self.sigm(out[:,rhsmin_idx].clone())
+		out[:,rhsmin_idx] = self.sigm(out[:,rhsmin_idx].clone())
 
 
 		#apply reparametrization
@@ -179,10 +172,10 @@ class Generator(nn.Module):
 		out[:,tasmax_idx] = out[:,tas_idx] + torch.exp(out[:,tasmax_idx].clone())
 		
 		#first update daily avg rhs
-		#out[:,rhs_idx] = self.sigm(out[:,rhsmin_idx] + torch.exp(out[:,rhs_idx].clone()))
+		out[:,rhs_idx] = self.sigm(out[:,rhsmin_idx] + torch.exp(out[:,rhs_idx].clone()))
 		
 		#then use it to update max rhs
-		#out[:,rhsmax_idx] = self.sigm(out[:,rhs_idx] + torch.exp(out[:,rhsmax_idx].clone()))
+		out[:,rhsmax_idx] = self.sigm(out[:,rhs_idx] + torch.exp(out[:,rhsmax_idx].clone()))
 
 		return out
 

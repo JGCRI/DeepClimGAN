@@ -31,12 +31,12 @@ class NETCDFDataPartition(data.Dataset):
 		self.data = self.load_tensors(partition, data_dir)
 		self.N = h * w * k
 		self.m = Normal(torch.tensor(0.0,device=device), torch.tensor(1.0,device=device))
-
+		self.device = device
+		
 	def __len__(self):
 		"""
 		Number of days (datapoints ) in the dataset
 		"""
-		#return self.data.shape[-1]
 		return self.len
 		
 	def load_tensors(self, partition, data_dir):
@@ -136,14 +136,16 @@ class NETCDFDataPartition(data.Dataset):
 		tas_idx = keys.index('tas')
 		
 		#compute mean maps for diff vector
-		mean_p_real = mean_maps_for_real[:,pr_idx,:,:].unsqueeze(0)
-		mean_t_real = mean_maps_for_real[:,tas_idx,:,:].unsqueeze(0)
-		mean_p_input = mean_maps_for_input[:,pr_idx,:,:].unsqueeze(0)
-		mean_t_input = mean_maps_for_input[:,tas_idx,:,:].unsqueeze(0) 
-		mean_map_real = torch.cat([mean_p_real, mean_t_real], dim=0)
-		mean_map_input = torch.cat([mean_p_input, mean_t_input], dim=0)
+		mean_p_real = mean_maps_for_real[:,pr_idx,:,:].unsqueeze(1)
+		mean_t_real = mean_maps_for_real[:,tas_idx,:,:].unsqueeze(1)
+		mean_p_input = mean_maps_for_input[:,pr_idx,:,:].unsqueeze(1)
+		mean_t_input = mean_maps_for_input[:,tas_idx,:,:].unsqueeze(1) 
 		
-		#concat current monfht and prev 5 days
+		#concatenate maps
+		mean_map_real = torch.cat([mean_p_real, mean_t_real], dim=1)
+		mean_map_input = torch.cat([mean_p_input, mean_t_input], dim=1)
+
+		#concat current month and prev 5 days
 		last_and_curr = torch.cat([high_res_context, input], dim=4)
 		channels = mean_map_input.shape[1]
 		days = last_and_curr.shape[-1]
@@ -151,15 +153,18 @@ class NETCDFDataPartition(data.Dataset):
 		
 		#get noise
 		noise = self.get_noise(noise_dim, batch_size)		
-		gpu0 = torch.device("cuda:0")
-		noise = noise.reshape([batch_size, channels, h, w]).to(gpu0)
+		noise = noise.reshape([batch_size, channels, h, w]).to(self.device)
 		
 		#compute diff tensor
-		diff = torch.sqrt((mean_map_real - mean_map_input) ** 2) + noise
-		size_to_expand = last_and_curr.shape[-1]
-		expanded_diff = torch.cat([diff.unsqueeze(-1)]*size_to_expand,dim=4)		
+		#diff = torch.sqrt((mean_map_real - mean_map_input) ** 2) + noise
+		#size_to_expand = last_and_curr.shape[-1]
+		#expanded_diff = torch.cat([diff.unsqueeze(-1)]*size_to_expand,dim=4)		
 		input = torch.cat([last_and_curr, avg_context], dim=1)
-		input = torch.cat([input, expanded_diff], dim=1)
+		#expanded_diff = torch.zeros(expanded_diff.shape).to(self.device)
+		
+		#input = torch.cat([input, expanded_diff], dim=1)
+		#print("input for build for D shape")
+		#print(input.shape)
 		return input
 
 

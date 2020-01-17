@@ -39,10 +39,9 @@ def save_grads(model, model_name):
 	grads = []
 	for p in model.parameters():
 		if not p.grad is None:
-			#grads.append(float(p.grad.data.norm(2).item()))
 			grads.append(float(p.grad.mean()))
-			#grads.append(float(p.grad.data))
 	grads = np.array(grads)
+	assert not np.isnan(grads).any(), model_name + " gradients are NaN with diff tensor"
 	if len(grads) > 0:
 		return np.linalg.norm(grads)
 	elif len(grads) == 0:

@@ -23,8 +23,8 @@ import argparse
 import logging
 import csv
 
-exp_id = 63
-ex = Experiment('Exp 63, Training with new config, z = 100')
+exp_id = 71
+ex = Experiment('Exp 71, adversar. Training with a model from experiment 70, z = 100')
 
 
 #MongoDB
@@ -87,13 +87,12 @@ class TrainerAdversar:
         netD = Discriminator(self.label_smoothing, self.is_autoencoder, self.z_shape)
         netD.apply(ut.weights_init)
        
-        channels = 4 
-        netG = Generator(self.lon, self.lat, self.context_length, channels, self.batch_size, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size)        
+        netG = Generator(self.lon, self.lat, self.context_length, n_channels, self.batch_size, self.z_shape, self.last_layer_size)        
         
-        paramsG = torch.load(self.pretrained_model + "netG.pt")
-        netG.load_state_dict(paramsG)
+        #paramsG = torch.load(self.pretrained_model + "netG.pt")
+        #netG.load_state_dict(paramsG)
   
-        #netG.apply(ut.weights_init)
+        netG.apply(ut.weights_init)
         #paramsD = torch.load(self.pretrained_model + "netD.pt")
         #netD.load_state_dict(paramsD)
 
@@ -130,7 +129,7 @@ class TrainerAdversar:
         rank = 0
         partition = self.partition[rank] #WARNING: testing using just 3 files from a dataset
         partition = partition[:len(partition)//2]#warning take just a half of a data
-        #partition = partition[:2]
+        #partition = partition[:1]
         logging.info("partition {}".format(partition))
         ds = NETCDFDataPartition(partition, self.data_dir, self.lat,self.lon,2,device0) # 2 for number of channels in low-res context
         logging.info("finished loading partition")
@@ -168,8 +167,8 @@ class TrainerAdversar:
                 current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
                 current_month_to_save = current_month
 
-                current_month = current_month[:,0:4,:,:,:]
-                high_res_context = high_res_context[:,0:4,:,:,:]
+                #current_month = current_month[:,0:channels,:,:,:]#NOTE: 0:4 hardocded
+                #high_res_context = high_res_context[:,0:channels,:,:,:]#NOTE: 0:4 hardcoded
         
                 if self.label_smoothing:
                     ts = np.full((self.total_batch_size), 0.9)
@@ -237,7 +236,6 @@ class TrainerAdversar:
                         #1A. Train D on real
                         outputs = netD(input).squeeze()
                         d_real_loss = loss_func(outputs, real_labelss[worker])
-                        logging.info("real loss: {}".format(d_real_loss.item()))                   
                         #report d_real_loss
                         self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates)
  
@@ -269,7 +267,7 @@ class TrainerAdversar:
                         outputs = netD(D_input.detach()).squeeze()
                         d_fake_loss = loss_func(outputs, fake_labelss[worker])
                         self._run.log_scalar('d_fake_loss', d_fake_loss.item(), n_updates)
-                        logging.info("fake loss: {}".format(d_fake_loss.item()))
+                        
                         #Add the gradients from the all-real and all-fake batches    
                         d_loss = d_real_loss + d_fake_loss
 

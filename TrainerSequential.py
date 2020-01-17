@@ -3,8 +3,8 @@ import os
 import sys
 from NETCDFDataPartition import NETCDFDataPartition
 from Discriminator import Discriminator
-#from Generator import Generator
-from Generator_alt import Generator
+from Generator import Generator
+#from Generator_alt import Generator
 from Normalizer import Normalizer
 import torch
 import torch.nn as nn
@@ -23,8 +23,8 @@ import argparse
 import logging
 import csv
 
-exp_id = 58
-ex = Experiment('Exp 58: Pre-Training G saving model after 500 updates, z = 128')
+exp_id = 71
+ex = Experiment('Exp 70: Training a model without diff tensor, just on MSE, saving data after  1k updates, z = 100')
 
 
 #MongoDB
@@ -87,8 +87,10 @@ class TrainerSequential:
         netD = Discriminator(self.label_smoothing, self.is_autoencoder, self.z_shape)
         netD.apply(ut.weights_init)
         
-        netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size)        
-        
+        netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size, self.z_shape, self.last_layer_size)        
+        #paramsG = torch.load(self.pretrained_model + "model.pt")
+        #netG.load_state_dict(paramsG)
+
         if not self.pretrain:
             params = torch.load(self.save_model + "model.pt")
             netG.load_state_dict(params)
@@ -158,9 +160,8 @@ class TrainerSequential:
                 #unwrap the batch            
                 current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
                 #since we are loading saved tensors, we don't need rhs, rhsmin, rhsmax now. So, from current month and high_res_ctxt select only [0:4) features
-                current_month = current_month[:,0:4,:,:,:]
-                high_res_context = high_res_context[:,0:4,:,:,:]
-                print("curr month and high res ctxt shapes {}".format(current_month.shape, high_res_context.shape))
+                #current_month = current_month[:,0:4,:,:,:]
+                #high_res_context = high_res_context[:,0:4,:,:,:]
 
 		
                 current_month_to_save = current_month
@@ -359,8 +360,8 @@ def get_std_map_for_fake(batch):
     sum_tsr = tsr.sum(-1)
     mean_tsr = sum_tsr / N
     mean_tsr.unsqueeze_(-1)#7 x 128 x 256 x 1
-    mean_tsr = mean_tsr.expand(4, 128, 256, N)
-
+    #mean_tsr = mean_tsr.expand(4, 128, 256, N)
+    mean_tsr = mean_tsr.expand(7, 128, 256, N)
     #calc sq diff on current batch on the process
     sq_diff = ((tsr - mean_tsr) ** 2).sum(-1)
     std_tsr = torch.sqrt(sq_diff / N)
@@ -380,7 +381,8 @@ def get_std_map(batch, comm_size):
     mean_tsr = sum_tsr / N
     #mean_tsr = sum_tsr / (N * comm_size)
     mean_tsr.unsqueeze_(-1)#7 x 128 x 256 x 1
-    mean_tsr = mean_tsr.expand(4, 128, 256, N) #4 x 128 x 256 x 64
+    #mean_tsr = mean_tsr.expand(4, 128, 256, N) #4 x 128 x 256 x 64
+    mean_tsr = mean_tsr.expand(7, 128, 256, N)
     #calc sq diff on current batch on the process and sum them up along days dimension
     sq_diff = ((tsr - mean_tsr) ** 2).sum(-1)
     #calc sq diffs for all the tensors
