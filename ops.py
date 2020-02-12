@@ -7,6 +7,10 @@ def conv3d(in_channels, out_channels, kernel_size = 4, stride = 2, padding = 1):
 def upconv3d(in_channels, out_channels, kernel_size = 4, stride = 2, padding = 1):
 	return nn.ConvTranspose3d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, bias = True)
 
+#same conv across time
+def upconv3d_same_in_time(in_channels, out_channels, kernel_size=(4,4,3), stride=(2,2,1), padding=(1,1,1)):
+	return nn.ConvTranspose3d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias = True)
+
 def conv3d_same(in_channels, out_channels, kernel_size=3, stride = 1, padding = 1):
 	return nn.Conv3d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding)
 
@@ -25,6 +29,9 @@ def lrelu(negative_slope = 0.2, inplace = True):
 	return nn.LeakyReLU(negative_slope, inplace)
 
 def conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+	return nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
+
+def conv2d_same(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
 	return nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
 
 def pool2d(kernel_size=4, stride=2, padding=1):

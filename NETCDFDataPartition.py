@@ -13,7 +13,8 @@ import logging as log
 #default params
 lat = 128
 lon = 256
-n_days = 32
+#n_days = 32
+n_days = 8
 n_channels = len(clmt_vars)
 #number of days to look back and in the future
 context_window = 5
@@ -162,9 +163,6 @@ class NETCDFDataPartition(data.Dataset):
 		input = torch.cat([last_and_curr, avg_context], dim=1)
 		#expanded_diff = torch.zeros(expanded_diff.shape).to(self.device)
 		
-		#input = torch.cat([input, expanded_diff], dim=1)
-		#print("input for build for D shape")
-		#print(input.shape)
 		return input
 
 

@@ -24,38 +24,41 @@ def process_tensors(data_path, exp_id, nrm, cmp_z_realizations):
 		ts_name = os.path.join(data_path, filename)
 		tsr = torch.load(ts_name)
 		tsr = tsr.detach().cpu()
-		print(tsr.shape)		
+		#print(tsr.shape)		
 		#Denormalize tensor
 		if cmp_z_realizations:
 			tsr = tsr[0]
 		tsr = nrm.denormalize(tsr)
 		pr_tsrs.append(tsr[clmt_var_keys.index('pr')])
-		tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
-		tasmin_tsrs.append(tsr[clmt_var_keys.index('tasmin')])
-		tasmax_tsrs.append(tsr[clmt_var_keys.index('tasmax')])
+		#tas_tsrs.append(tsr[clmt_var_keys.index('tas')])
+		#tasmin_tsrs.append(tsr[clmt_var_keys.index('tasmin')])
+		#tasmax_tsrs.append(tsr[clmt_var_keys.index('tasmax')])
 		#rhsmin_tsrs.append(tsr[clmt_var_keys.index('rhsmin')])
 		#rhsmax_tsrs.append(tsr[clmt_var_keys.index('rhsmax')])
 		#rhs_tsrs.append(tsr[clmt_var_keys.index('rhs')])
 
 	#return (pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs, rhs_tsrs, rhsmin_tsrs, rhsmax_tsrs)
-	return pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs
+	#return pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs
+	return pr_tsrs
 
 def merge_tensors(tsrs):
 
 	#pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs, rhs_tsrs, rhsmin_tsrs, rhsmax_tsrs = tsrs
-	pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs = tsrs
+	#pr_tsrs, tas_tsrs, tasmin_tsrs, tasmax_tsrs = tsrs
+	pr_tsrs = tsrs
 	pr_tsr = torch.cat(pr_tsrs, dim=2)
-	tas_tsr = torch.cat(tas_tsrs, dim=2)
-	tasmin_tsr = torch.cat(tasmin_tsrs, dim=2)
-	tasmax_tsr = torch.cat(tasmax_tsrs, dim=2)
+	#tas_tsr = torch.cat(tas_tsrs, dim=2)
+	#tasmin_tsr = torch.cat(tasmin_tsrs, dim=2)
+	#tasmax_tsr = torch.cat(tasmax_tsrs, dim=2)
 	#rhs_tsr = torch.cat(rhs_tsrs, dim=2)
 	#rhsmin_tsr = torch.cat(rhsmin_tsrs, dim=2)
 	#rhsmax_tsr = torch.cat(rhsmax_tsrs, dim=2)
 	N_DAYS = pr_tsr.shape[-1]
 
-	rhs_tsr = rhsmin_tsr = rhsmax_tsr = None
+	#rhs_tsr = rhsmin_tsr = rhsmax_tsr = None
 	#return pr_tsr, tas_tsr, tasmin_tsr, tasmax_tsr, rhs_tsr, rhsmin_tsr, rhsmax_tsr
-	return pr_tsr, tas_tsr, tasmin_tsr, tasmax_tsr
+	#return pr_tsr, tas_tsr, tasmin_tsr, tasmax_tsr
+	return pr_tsr
 
 def get_tas_stat(tas_tsr):
 	"""
@@ -266,8 +269,6 @@ def calc_dewpoint(rhs, tas):
 
 
 
-
-
 def write_stats_to_csv(stats, fname, exp_id, type):
 	"""
 	precip, tas, tasmin/max, rhs, rhsmin/max
@@ -302,9 +303,19 @@ def get_header(idx):
 
 
 def write_to_csv_for_time_series(tsrs, path, prefix):
+	"""
+	tsrs: tensor of all cliamte variable, size: N_vars x 128 x 256 x 10240, where
+		10240 - 320 samples of months in 32 days
+	"""
 
-	tsrs = list(tsrs)
+
+	#print(tsrs.shape)
+	#tsrs = list(tsrs)
+	
+	#print(tsrs[0].shape)
+	#print(len(tsrs))
 	ts_ctr = 0
+	tsrs = [tsrs] #input variable tsrs is just a precipiation
 	for tsr in tsrs:
 		ts_name = os.path.join(path, prefix + "_" + str(ts_ctr) + ".csv")
 		with open(ts_name, 'w+') as of:
@@ -322,7 +333,7 @@ def check_pr(pr_real):
 	pr = np.asarray(pr_real)
 	N_days = pr.shape[-1]
 	zero_fraq = len(pr[pr == 0]) / N_days * 128 * 256
-	print("neg fraq {}".format(zero_fraq))
+	#print("neg fraq {}".format(zero_fraq))
 	pr_norm = np.log(1 + pr)
 	negatives = pr_norm[pr_norm < 0]
 	print("Negative values in pr after log norm {}".format(len(negatives)))
@@ -359,9 +370,9 @@ def check_rhs(rhs_real, mean, std):
 def sigmoid(x):
 	return 1 / (1 + np.exp(-x))	
 
-def main():
-	
 
+
+def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--gen_data_dir', type=str)
 	parser.add_argument('--real_data_dir', type=str)
@@ -378,7 +389,6 @@ def main():
 	parser.add_argument('--cmp_z_realizations_dir', type=str)
 	
 	args = parser.parse_args()
-
 	real_data_dir = args.real_data_dir
 	gen_data_dir = args.gen_data_dir
 	real_csv_dir = args.real_csv_dir
@@ -409,14 +419,13 @@ def main():
 		gen_data_dir = gen_data_dir + "exp_" + str(exp_id) + "/"
 		real_data_dir = real_data_dir + "exp_" + str(exp_id) + "/"
 
-	print(gen_data_dir, real_data_dir)	
 	tsrs = process_tensors(gen_data_dir, exp_id, nrm, cmp_z_realizations)
-	pr_gen, tas_gen, tasmin_gen, tasmax_gen = merge_tensors(tsrs)	
-
+	#pr_gen, tas_gen, tasmin_gen, tasmax_gen = merge_tensors(tsrs)	
+	pr_gen = merge_tensors(tsrs)
 
 	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm, cmp_z_realizations)
-	pr_real, tas_real, tasmin_real, tasmax_real = merge_tensors(real_tsrs)
-	
+	#pr_real, tas_real, tasmin_real, tasmax_real = merge_tensors(real_tsrs)
+	pr_real = merge_tensors(real_tsrs)
 		
 
 	one_month = 32 #one month = 32 days
@@ -424,6 +433,7 @@ def main():
 	print("n_maps num{}".format(n_maps))
 	panoply_dir = for_panoply_dir	
 
+	#print("pr real shape ".format(pr_real.shape))
 
 
 
@@ -474,59 +484,68 @@ def main():
 
 	#Generated data stats
 	p_stat = get_p_stat_for_cells(pr_gen)
-	tas_stats = get_tas_stat(tas_gen)
-	tas_min_max_stat = get_tas_min_max_stat_for_cells(tas_gen, tasmin_gen, tasmax_gen)
+	#tas_stats = get_tas_stat(tas_gen)
+	#tas_min_max_stat = get_tas_min_max_stat_for_cells(tas_gen, tasmin_gen, tasmax_gen)
 	#rhs_stats = get_rhs_stat_for_cells(rhs_gen)
 	#rhsmin_max = get_rhs_min_max_stat_for_cells(rhs_gen, rhsmin_gen, rhsmax_gen)
-	rhs_stats = rhsmin_max = None
+	#rhs_stats = rhsmin_max = None
 	#dewpoint = get_dewpoint_stat_for_cells(rhs_gen, tas_gen)
-	dewpoint = None
-	gen_stats = [p_stat, tas_stats, tas_min_max_stat]
+	#dewpoint = None
+	#gen_stats = [p_stat, tas_stats, tas_min_max_stat]
+	gen_stats = [p_stat]
 	write_stats_to_csv(gen_stats, stats_dir, exp_id, "gen")
 	
 	#save ptime series for precip from 2 processes
-	precip_gen = tsrs[0][:2]
-	tas_gen = tsrs[1][:2]
-	tasmin_gen = tsrs[2][:2]
-	tasmax_gen = tsrs[3][:2]
+	
+	#print(tsrs[0].shape)
+	precip_gen = tsrs[0]
+	#precip_gen = tsrs[0][:2]
+	#print(tsrs[0].shape)
+	#print(precip_gen.shape)
+	#print(tsrs[0].shape)
+	#tas_gen = tsrs[1][:2]
+	#tasmin_gen = tsrs[2][:2]
+	#tasmax_gen = tsrs[3][:2]
 	#rhs_gen = tsrs[4][:2]
 	#rhsmin_gen = tsrs[5][:2]
 	#rhsmax_gen = tsrs[6][:2]	
 	
-	print(gen_csv_dir)
+	
 	write_to_csv_for_time_series(precip_gen, gen_csv_dir, "pr")
-	write_to_csv_for_time_series(tas_gen, gen_csv_dir, "tas")
-	write_to_csv_for_time_series(tasmin_gen, gen_csv_dir, "tasmin")
-	write_to_csv_for_time_series(tasmax_gen, gen_csv_dir, "tasmax")
+	#write_to_csv_for_time_series(tas_gen, gen_csv_dir, "tas")
+	#write_to_csv_for_time_series(tasmin_gen, gen_csv_dir, "tasmin")
+	#write_to_csv_for_time_series(tasmax_gen, gen_csv_dir, "tasmax")
 	#write_to_csv_for_time_series(rhs_gen, gen_csv_dir, "rhs")
 	#write_to_csv_for_time_series(rhsmin_gen, gen_csv_dir, "rhsmin")
 	#write_to_csv_for_time_series(rhsmax_gen, gen_csv_dir, "rhsmax")
 
 	#Real data stats
 	p_stat_real = get_p_stat_for_cells(pr_real)
-	tas_stat_real = get_tas_stat(tas_real)
-	tas_min_max_stat_real = get_tas_min_max_stat_for_cells(tas_real, tasmin_real, tasmax_real)
+	#tas_stat_real = get_tas_stat(tas_real)
+	#tas_min_max_stat_real = get_tas_min_max_stat_for_cells(tas_real, tasmin_real, tasmax_real)
 	#rhs_stat_real = get_rhs_stat_for_cells(rhs_real)
 	#rhsmin_max_real = get_rhs_min_max_stat_for_cells(rhs_real, rhsmin_real, rhsmax_real)
-	rhs_stat_real = rhsmin_max_real = None
+	#rhs_stat_real = rhsmin_max_real = None
 	#dewpoint_real = get_dewpoint_stat_for_cells(rhs_real, tas_real)
-	dewpoint_real = None
-	real_stats = [p_stat_real, tas_stat_real, tas_min_max_stat_real]	
+	#dewpoint_real = None
+	real_stats = [p_stat_real]
+	#real_stats = [p_stat_real, tas_stat_real, tas_min_max_stat_real]	
 	write_stats_to_csv(real_stats, stats_dir, exp_id, "real")
 
-	precip_real = real_tsrs[0][0:2]
-	tas_real = real_tsrs[1][0:2]
-	tasmin_real = real_tsrs[2][0:2]
-	tasmax_real = real_tsrs[3][0:2]
+	precip_real = real_tsrs[0]
+	#precip_real = real_tsrs[0][0:2]
+	#tas_real = real_tsrs[1][0:2]
+	#tasmin_real = real_tsrs[2][0:2]
+	#tasmax_real = real_tsrs[3][0:2]
 	#rhs_real = real_tsrs[4][0:2]
 	#rhsmin_real = real_tsrs[5][0:2]
 	#rhsmax_real = real_tsrs[6][0:2]
 
-	print(real_csv_dir)
+	#print(real_csv_dir)
 	write_to_csv_for_time_series(precip_real, real_csv_dir, "pr")
-	write_to_csv_for_time_series(tas_real, real_csv_dir, "tas")
-	write_to_csv_for_time_series(tasmin_real, real_csv_dir, "tasmin")
-	write_to_csv_for_time_series(tasmax_real, real_csv_dir, "tasmax")
+	#write_to_csv_for_time_series(tas_real, real_csv_dir, "tas")
+	#write_to_csv_for_time_series(tasmin_real, real_csv_dir, "tasmin")
+	#write_to_csv_for_time_series(tasmax_real, real_csv_dir, "tasmax")
 	#write_to_csv_for_time_series(rhs_real, real_csv_dir, "rhs")
 	#write_to_csv_for_time_series(rhsmin_real, real_csv_dir, "rhsmin")
 	#write_to_csv_for_time_series(rhsmax_real, real_csv_dir, "rhsmax")

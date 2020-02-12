@@ -3,9 +3,11 @@ import torch
 from ops import *
 from Constants import clmt_vars, n_channels_in_diff_vct
 import logging
+
 """
 reference: https://github.com/batsa003/videogan/blob/master/model.py
 """
+
 n_channels = len(clmt_vars)
 class Discriminator(nn.Module):
 	def __init__(self, label_smoothing, is_autoencoder, z_shape):

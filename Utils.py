@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 import torch
 from Constants import scenarios
-
+import logging as log
 
 def weights_init(m):
 	"""
@@ -191,6 +191,75 @@ def get_node_size(file_name):
                 info = line.split(" ")
                 size = int(info[-2]) * GB_to_KB
                 return size
+
+
+def generators_additional_term(y_hat, y, alpha, beta, lambdas, epsilon=0.01):
+	"""
+	Computes KL divergence between two gamma distributions
+	y_hat, y: B_SIZE x N_CHANNELS x 128 x 256 x N_days
+	alpha, beta: scalars
+	epsilon: default = 0
+	lambdas: lamda1, lambda2, lambda3: scalars
+	"""
+	lambda1, lambda2, lambda3 = lambdas
+	b_size, channels, n_days = y_hat.shape[0], y_hat.shape[1], y_hat.shape[-1]
+	
+	#compute preliminaries for y_hat
+	hatZM = y_hat > epsilon #non zero precip days
+	hatcount = torch.sum(hatZM,dim=-1)
+	hatomega = hatcount > epsilon
+
+	trueZM = y > epsilon #non zero precip days
+	truecount = torch.sum(trueZM,dim=-1)
+	trueomega = truecount > epsilon
+
+	omega = hatomega * trueomega
+	not_omega = ~omega
+
+	#compute first term
+	pred_rain_y = torch.sum(nn.functional.sigmoid(alpha * y_hat + beta), dim=-1).float()	
+	true_rain_y = torch.sum(trueZM, dim=-1).float()
+	term1 = torch.sum((pred_rain_y - true_rain_y) ** 2) #same as torch.mul(a, b)
+            # note: term1 could have "omega *" in there as described in the pdf
+
+	#compute second term
+	y_hat_norm = y_hat
+	#y_hat_norm = torch.log(y_hat).float() #apply log norm
+	masked = y_hat_norm[hatZM]
+	mean = (torch.sum(masked, dim=-1) / hatcount).float()
+	mean_cube = mean.unsqueeze(-1).repeat(1,1,1,1,n_days).float()
+	masked2 = ((y_hat_norm - mean_cube) ** 2)[hatZM]
+	var = (torch.sum(masked2, dim=-1) / hatcount).float()
+	
+	#compute second term ground truth
+	y_norm = y
+	#y_norm = torch.log(y).float() #apply log norm
+	masked3 = y_norm[trueZM]
+	mean_true = (torch.sum(masked3, dim=-1) / truecount).float()
+	mean_cube_true = mean_true.unsqueeze(-1).repeat(1,1,1,1,n_days).float()
+	masked4 = ((y_norm - mean_cube_true) ** 2)[trueZM]
+	var_true = (torch.sum(masked4, dim=-1) / truecount).float()
+
+	#compute KL 
+	KL_left = 1 / 2 * var ** 2
+	KL_right = (mean_true - mean) ** 2 + var_true ** 2 - var ** 2 + torch.log(var / var_true)
+	KL = KL_left + KL_right
+	print(KL[:10])
+	masked5 = KL[omega]
+	print(masked5[:10])
+	term2 = torch.sum(masked5).float()
+
+	#compute third term
+	term3 = torch.sum((torch.abs(mean_true - mean) + torch.abs(var_true - var)).float()[not_omega])
+
+	#finally, loss
+	loss = (lambda1*term1 + lambda2*term2 + lambda3*term3).long()
+
+	log.info("losses; term1 : {}, term2: {}, term3: {}".format(term1, term2, term3))
+	return loss
+	
+	
+	
 
 
 

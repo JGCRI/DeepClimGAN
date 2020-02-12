@@ -3,7 +3,7 @@ import os
 import sys
 from NETCDFDataPartition import NETCDFDataPartition
 from Discriminator import Discriminator
-from Generator import Generator
+from DeepClimGAN_Alt/Generator import Generator
 #from Generator_alt import Generator
 from Normalizer import Normalizer
 import torch
@@ -24,8 +24,8 @@ import logging
 import csv
 
 
-exp_id = 71
-ex = Experiment('Exp 71: Training GAN on pre-trained model from exp 70')
+exp_id = 76
+ex = Experiment('Exp 76: Pretrain G using only precipitation')
 
 
 #MongoDB
@@ -40,8 +40,7 @@ n_channels = len(clmt_vars)
 @ex.config
 def my_config():
 	context_length = 5
-	lon, lat, t, channels = 128, 256, 30, len(clmt_vars)
-	n_days = 32
+	lon, lat, t, channels = 128, 256, 32, len(clmt_vars)
 	apply_norm = True
 	#hyperparamteres
 	label_smoothing = False
@@ -54,8 +53,8 @@ def my_config():
 class Trainer:
 	@ex.capture
 	def __init__(self):
-		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.n_days, self.apply_norm, self.data_dir = self.set_parameters()
-		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder,self.z_shape,  self.last_layer_size, self.pretrained_model  = self.set_hyperparameters()
+		self.lon, self.lat, self.context_length, self.channels, self.z_shape, self.apply_norm, self.data_dir = self.set_parameters()
+		self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder,self.z_shape,  self.last_layer_size, self.pretrained_model, self.n_days  = self.set_hyperparameters()
 		self.exp_id, self.exp_name, self._run = self.get_exp_info()
 		#buffer for expereince replay		
 		self.replay_buffer = []
@@ -65,12 +64,12 @@ class Trainer:
 
 
 	@ex.capture
-	def set_parameters(self, lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir):
-		return lon, lat, context_length, channels, z_shape, n_days, apply_norm, data_dir
+	def set_parameters(self, lon, lat, context_length, channels, z_shape, apply_norm, data_dir):
+		return lon, lat, context_length, channels, z_shape, apply_norm, data_dir
 	
 	@ex.capture
-	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape,  last_layer_size, pretrained_model):
-		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder,z_shape,  last_layer_size, pretrained_model
+	def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape,  last_layer_size, pretrained_model, n_days):
+		return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder,z_shape,  last_layer_size, pretrained_model, n_days
 	
 	@ex.capture
 	def get_exp_info(self, _run):
@@ -86,15 +85,17 @@ class Trainer:
 
 		#build models
 		netD = Discriminator(self.label_smoothing, self.is_autoencoder, self.z_shape)
-		netD.apply(ut.weights_init)
-		#paramsD = torch.load(self.pretrained_model + "netD.pt")
-		#netD.load_state_dict(paramsD)
+		netG = Generator(self.lon, self.lat, self.context_length, self.channels, self.batch_size, self.z_shape, self.last_layer_size)		
+		if not self.pretrain:
+			paramsG = torch.load(self.pretrained_model + "netG.pt")
+			netG.load_state_dict(paramsG)
+			
+			paramsD = torch.load(self.pretrained_model + "netD.pt")
+			netD.load_state_dict(paramsD)
+		else:
+			netG.apply(ut.weights_init)
+			netD.apply(ut.weights_init)
 
-		netG = Generator(self.lon, self.lat, self.context_length, 7, self.batch_size, self.z_shape, self.last_layer_size)		
-		paramsG = torch.load(self.pretrained_model + "netG.pt")
-		netG.load_state_dict(paramsG)
-		#netG.apply(ut.weights_init)
-		
 
 		#create optimizers
 		loss_func = torch.nn.BCELoss()
@@ -114,11 +115,8 @@ class Trainer:
 		netG.to(device)
 		
 		comm_size = self.world_size
-		#logging.info("comm size {}".format(comm_size))
-		#reset the batch size based on the number of processes used
 		self.total_batch_size = self.batch_size		
 		self.batch_size = self.batch_size // comm_size
-		#logging.info("batch size {}".format(self.batch_size))
 		
 		self.replay_buffer_size = 20 * self.batch_size
 		n_data_to_save_on_process = self.n_data_to_save // comm_size #should be on CPU
@@ -162,9 +160,6 @@ class Trainer:
 				current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
 				current_month_to_save = current_month
 					
-				#current_month = current_month[:,0:4,:,:,:]
-				#high_res_context = high_res_context[:,0:4,:,:,:]
-
 				if self.label_smoothing:
 					ts = np.full((self.batch_size), 0.9)
 					real_labels = ut.to_variable(torch.FloatTensor(ts), requires_grad = False)
@@ -185,7 +180,48 @@ class Trainer:
 				z = ds.get_noise(self.z_shape, self.batch_size)
 				z = z.to(device)
 				
-				
+				if self.pretrain and not self.is_autoencoder:
+					netG.zero_grad()
+					high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
+					fake_outputs = netG(z[worker], avg_ctxt_for_G, high_res_for_G)
+					losses = pretrain_G(fake_outputs, current_months[worker], mse_loss_func, comm_size, device) # WARNING: comm_size hardcoded to 1
+					loss = losses["total_loss"]
+					total_loss = loss[0]
+					logging.info("epoch {}, rank {}, update {}, g loss {:0.18f}".format(current_epoch, 0, n_updates, total_loss.item())) # WARNING: rank hardcoded to 0
+					total_loss.backward()
+					g_optim.step()
+					
+					if n_updates == self.save_gen_data_update:
+						save_model(netG, self.save_model, "netG")
+						save_model(netD, self.save_model, "netD")
+
+					#save real data to calculate statistics
+					if n_updates >= self.save_gen_data_update and n_real_saved < n_data_to_save_on_process:
+						current_month_to_save = current_month.to(cpu_dev)
+						real_data_saved.append(current_month_to_save)
+						n_real_saved += self.total_batch_size
+						dates_mapping.append(year_month_date)
+						if n_real_saved >= n_data_to_save_on_process:
+							save_data(real_data_saved, self.real_data_dir, rank, exp_id, dates_mapping)
+							#free buffer
+							real_data_saved = []
+							dates_mapping = []
+
+
+					#save fake data to calculate statistics
+					if n_updates >= self.save_gen_data_update and n_gen_saved < n_data_to_save_on_process:
+						fake_outputs = fake_outputs.to(cpu_dev)
+						gen_data_saved.append(fake_outputs)
+						n_gen_saved += self.total_batch_size
+						if n_gen_saved >= n_data_to_save_on_process:
+							save_data(gen_data_saved, self.gen_data_dir, rank, exp_id, dates_mapping)
+							#free buffer
+							gen_data_saved = []
+					else:
+						#break out of the iteration
+						continue
+
+
 				#GAN training
 				#1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
 				if n_updates % 2 == 1:
@@ -386,6 +422,7 @@ def log_losses(run, losses, update):
 	run.log_scalar('total_loss', total_loss.item(), update)
 
 
+#NOW COMPUTE LOSS ONLY FOR PRECIPITATION
 def pretrain_G(fake_outputs, current_month_batch, mse_loss_func, comm_size, device):
 	#compute targets
 	map_mean_target = get_mean_map(current_month_batch, comm_size)
@@ -397,34 +434,30 @@ def pretrain_G(fake_outputs, current_month_batch, mse_loss_func, comm_size, devi
 	
 	#compute losses for means for each channel
 	loss_mean_0 = mse_loss_func(map_mean_target[0], batch_fake_outputs_mean[0])
-	loss_mean_1 = mse_loss_func(map_mean_target[1], batch_fake_outputs_mean[1])
-	loss_mean_2 = mse_loss_func(map_mean_target[2], batch_fake_outputs_mean[2])
-	loss_mean_3 = mse_loss_func(map_mean_target[3], batch_fake_outputs_mean[3])
-	loss_mean_4 = mse_loss_func(map_mean_target[4], batch_fake_outputs_mean[4])
-	loss_mean_5 = mse_loss_func(map_mean_target[5], batch_fake_outputs_mean[5])
-	loss_mean_6 = mse_loss_func(map_mean_target[6], batch_fake_outputs_mean[6])
-	
-	total_loss = loss_mean_0 + loss_mean_1 + loss_mean_2 + loss_mean_3 + loss_mean_4 + loss_mean_5 + loss_mean_6
+	#loss_mean_1 = mse_loss_func(map_mean_target[1], batch_fake_outputs_mean[1])
+	#loss_mean_2 = mse_loss_func(map_mean_target[2], batch_fake_outputs_mean[2])
+	#loss_mean_3 = mse_loss_func(map_mean_target[3], batch_fake_outputs_mean[3])
+	#loss_mean_4 = mse_loss_func(map_mean_target[4], batch_fake_outputs_mean[4])
+	#loss_mean_5 = mse_loss_func(map_mean_target[5], batch_fake_outputs_mean[5])
+	#loss_mean_6 = mse_loss_func(map_mean_target[6], batch_fake_outputs_mean[6])
+	#total_loss = loss_mean_0 + loss_mean_1 + loss_mean_2 + loss_mean_3 + loss_mean_4 + loss_mean_5 + loss_mean_6
 
 	#compute losses for stds for each channel
 	loss_std_0 = mse_loss_func(map_std_target[0], batch_fake_outputs_std[0])
-	loss_std_1 = mse_loss_func(map_std_target[1], batch_fake_outputs_std[1])
-	loss_std_2 = mse_loss_func(map_std_target[2], batch_fake_outputs_std[2])
-	loss_std_3 = mse_loss_func(map_std_target[3], batch_fake_outputs_std[3])
-	loss_std_4 = mse_loss_func(map_std_target[4], batch_fake_outputs_std[4])
-	loss_std_5 = mse_loss_func(map_std_target[5], batch_fake_outputs_std[5])
-	loss_std_6 = mse_loss_func(map_std_target[6], batch_fake_outputs_std[6])
+	#loss_std_1 = mse_loss_func(map_std_target[1], batch_fake_outputs_std[1])
+	#loss_std_2 = mse_loss_func(map_std_target[2], batch_fake_outputs_std[2])
+	#loss_std_3 = mse_loss_func(map_std_target[3], batch_fake_outputs_std[3])
+	#loss_std_4 = mse_loss_func(map_std_target[4], batch_fake_outputs_std[4])
+	#loss_std_5 = mse_loss_func(map_std_target[5], batch_fake_outputs_std[5])
+	#loss_std_6 = mse_loss_func(map_std_target[6], batch_fake_outputs_std[6])
 
-	total_loss += loss_std_0 + loss_std_1 + loss_std_2 + loss_std_3 + loss_std_4 + loss_std_5 + loss_std_6
-
-	tas_loss, rhs_loss = reg_rh_and_tas(fake_outputs, device)
-	total_loss += tas_loss + rhs_loss
+	#total_loss += loss_std_0 + loss_std_1 + loss_std_2 + loss_std_3 + loss_std_4 + loss_std_5 + loss_std_6
+	total_loss = loss_mean_0 + loss_std_0
+	
+	#tas_loss, rhs_loss = reg_rh_and_tas(fake_outputs, device)
+	#total_loss += tas_loss + rhs_loss
 		
 	loss = {
-		"mean_losses" : [loss_mean_0, loss_mean_1, loss_mean_2, loss_mean_3, loss_mean_4, loss_mean_5, loss_mean_6],
-		"std_losses" : [loss_std_0, loss_std_1, loss_std_2, loss_std_3, loss_std_4, loss_std_5, loss_std_6],
-		"rhs_loss" : [rhs_loss],
-		"tas_loss" : [tas_loss],
 		"total_loss" : [total_loss]
 	}
 	
@@ -596,7 +629,7 @@ if __name__ == "__main__":
 	parser.add_argument('--pretrained_model', type=str)
 	parser.add_argument('--n_generate_for_one_z', type=int)
 	parser.add_argument('--last_layer_size', type=int)
-
+	parser.add_argument('--n_days', type=int)
 
 	args = parser.parse_args()
 
@@ -616,6 +649,7 @@ if __name__ == "__main__":
 	pretrained_model=args.pretrained_model
 	last_layer_size=args.last_layer_size
 	z_shape=args.z_shape
+	n_days=args.n_days
 	
 	#print(f'localrank: {lrank}	host: {os.uname()[1]}')
 	torch.cuda.set_device(lrank)
@@ -636,6 +670,7 @@ if __name__ == "__main__":
 		is_autoencoder=is_autoencoder,
 		z_shape=z_shape,
 		pretrained_model=pretrained_model,
-		last_layer_size=last_layer_size)
+		last_layer_size=last_layer_size,
+		n_days=n_days)
 	
 	ex.run()
