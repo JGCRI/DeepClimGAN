@@ -264,16 +264,15 @@ def generators_additional_term(y_hat, y, alpha, beta, lambdas, epsilon=0.01):
 
 
 class GaussianNoise(nn.Module):
-	def __init__(self, device, stddev=0.2, is_relative_detach=True, is_training=True):
+	def __init__(self,  stddev=0.2, is_relative_detach=True, is_training=True):
 		super().__init__()
 		self.stddev= stddev
 		self.is_relative_detach = is_relative_detach
 		self.is_training = is_training
-		self.device = device
 
-	def forward(self, x):
+	def forward(self, x, device):
 		if self.is_training and self.stddev != 0:
-			tsr = torch.randn(x.size()).cuda()
+			tsr = torch.randn(x.size()).to(device)
 			noise = Variable(tsr * self.stddev)
 			x = x + noise
 		return x

@@ -4,7 +4,10 @@ import os
 import sys
 from DeepClimGAN_Alt.NETCDFDataPartition import NETCDFDataPartition
 from DeepClimGAN_Alt.Discriminator_uncond import Discriminator
-from DeepClimGAN_Alt.Generator_uncond import Generator
+from DeepClimGAN_Alt.Generator_alt import Generator
+#from DeepClimGAN_Alt.Generator_uncond import Generator
+#from DeepClimGAN_Alt.Generator import Generator
+#from DeepClimGAN_Alt.Discriminator import Discriminator
 #from Generator_alt import Generator
 from Normalizer import Normalizer
 import torch
@@ -24,8 +27,8 @@ import logging
 import csv
 from random import randint
 
-exp_id = 85
-ex = Experiment('Exp 85, adversarial training with a model from exp_83')
+exp_id = 114
+ex = Experiment('Exp 114, adv training of a model, where G is cond and D uncond, added mean loss only to G update, using model from exp_107, saving data after 10k updates')
 
 
 #MongoDB
@@ -47,7 +50,8 @@ def my_config():
     add_noise = False
     experience_replay = False
     replay_buffer_size = batch_size * 20
-    lr = 0.0002 #NOTE: this lr is coming from the original paper about DCGAN
+    G_lr = 0.0001 #NOTE: this lr is coming from the original paper about DCGAN
+    D_lr = 0.00001
     l1_lambda = 10
     lambda1 = 1
     lambda2 = 1
@@ -60,7 +64,7 @@ class TrainerAdversar:
     @ex.capture
     def __init__(self):
         self.lon, self.lat, self.context_length, self.channels,  self.apply_norm, self.data_dir, self.lambdas, self.alpha, self.beta = self.set_parameters()
-        self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir,self.save_model_dir, self.z_shape, self.pretrained_model, self.n_generate_for_one_z, self.dir_to_save_z_realizations, self.num_smoothing_conv_layers, self.last_layer_size, self.n_days, self.label_smoothing, self.train_with_context  = self.set_hyperparameters()
+        self.add_noise, self.experience_replay, self.batch_size, self.G_lr, self.D_lr,self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir,self.save_model_dir, self.z_shape, self.pretrained_model, self.n_generate_for_one_z, self.dir_to_save_z_realizations, self.num_smoothing_conv_layers, self.last_layer_size, self.n_days, self.label_smoothing, self.train_G_with_context, self.train_D_with_lowres_context, self.train_D_with_highres_context,self.start_lr, self.end_lr, self.add_mean_loss, self.partition_start = self.set_hyperparameters()
         self.exp_id, self.exp_name, self._run = self.get_exp_info()
         #buffer for expereince replay        
         self.replay_buffer = []
@@ -75,8 +79,8 @@ class TrainerAdversar:
         return lon, lat, context_length, channels, apply_norm, data_dir, lambdas, alpha, beta
     
     @ex.capture
-    def set_hyperparameters(self, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, save_model_dir, z_shape, pretrained_model, n_generate_for_one_z, dir_to_save_z_realizations, num_smoothing_conv_layers, last_layer_size, n_days, label_smoothing, train_with_context):
-        return add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, save_model_dir, z_shape, pretrained_model, n_generate_for_one_z, dir_to_save_z_realizations, num_smoothing_conv_layers, last_layer_size, n_days, label_smoothing, train_with_context
+    def set_hyperparameters(self, add_noise, experience_replay, batch_size, G_lr, D_lr,l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, save_model_dir, z_shape, pretrained_model, n_generate_for_one_z, dir_to_save_z_realizations, num_smoothing_conv_layers, last_layer_size, n_days, label_smoothing, train_G_with_context, train_D_with_lowres_context, train_D_with_highres_context,start_lr, end_lr, add_mean_loss, partition_start):
+        return add_noise, experience_replay, batch_size, G_lr,D_lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, save_model_dir, z_shape, pretrained_model, n_generate_for_one_z, dir_to_save_z_realizations, num_smoothing_conv_layers, last_layer_size, n_days, label_smoothing, train_G_with_context, train_D_with_lowres_context, train_D_with_highres_context,start_lr, end_lr, add_mean_loss, partition_start
     
     @ex.capture
     def get_exp_info(self, _run):
@@ -110,8 +114,8 @@ class TrainerAdversar:
         if self.label_smoothing:
             loss_func = torch.nn.KLDivLoss()
         
-        d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.05, 0.0999])
-        g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.05, 0.0999])
+        d_optim = torch.optim.AdamW(netD.parameters(), self.G_lr)
+        g_optim = torch.optim.AdamW(netG.parameters(), self.D_lr)
         
         device0 = torch.device("cuda:0")
         device1 = torch.device("cuda:1")
@@ -134,7 +138,7 @@ class TrainerAdversar:
 
         rank = 0
         partition = self.partition[rank] #WARNING: testing using just 3 files from a dataset
-        partition = partition[:len(partition)//2]#warning take just a half of a data
+        partition = partition[self.partition_start:(len(partition) // 2)]#warning take just a half of a data
         #partition = partition[:1]
         logging.info("partition {}".format(partition))
         ds = NETCDFDataPartition(partition, self.data_dir, self.lat, self.lon, 2, device0) # 2 for number of channels in low-res context
@@ -152,9 +156,9 @@ class TrainerAdversar:
         n_real_saved, n_gen_saved = 0, 0
         dates_mapping = []
         min_loss = float('inf')
+        fake_input_with_ctxt = None
 
-
-        self.num_workers = 1 #HARDCODED VALUE            
+        #self.num_workers = 1 #HARDCODED VALUE            
         #Training loop
         for current_epoch in range(1, self.num_epoch + 1):        
             n_updates = 1
@@ -175,6 +179,10 @@ class TrainerAdversar:
                 current_month, avg_context, high_res_context, year_month_date = batch["curr_month"], batch["avg_ctxt"], batch["high_res"], batch["year_month_date"]
                 current_month_to_save = current_month
 
+                #for confusion matrix for D update and G updates
+                total_TP, total_FN, total_FP, total_TN = 0, 0, 0, 0
+                total_TN_for_G_update, total_FP_for_G_update = 0, 0
+
                 if self.label_smoothing:
                     ts = np.full((self.total_batch_size), 0.9)
                     real_labels = ut.to_variable(torch.FloatTensor(ts), requires_grad = False)
@@ -191,6 +199,9 @@ class TrainerAdversar:
                 z = ds.get_noise(self.z_shape, self.batch_size)
                 real_labelss = list(torch.chunk(real_labels,self.num_workers))
                 fake_labelss = list(torch.chunk(fake_labels,self.num_workers))
+                if self.add_noise: # WARNING: may need to be applied to each month in current_months
+                    self.noise = GaussianNoise()
+
                 current_months = list(torch.chunk(current_month,self.num_workers))
                 avg_contexts = list(torch.chunk(avg_context,self.num_workers))
                 high_res_contexts = list(torch.chunk(high_res_context,self.num_workers))
@@ -198,41 +209,33 @@ class TrainerAdversar:
                 z = list(torch.chunk(z, self.num_workers))
                 fake_outputs = []
 
-
-                #by default generate 3,	but can	fix it later
-                if self.n_generate_for_one_z > 0:
-                     high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_context, high_res_context)
-                     #first save real month
-                     torch.save(current_month, self.dir_to_save_z_realizations  + 'exp_' + str(exp_id) + '/real/current_month.pt')
-                     for i in range(self.n_generate_for_one_z):
-                          print(initial_z.shape, avg_ctxt_for_G.shape, high_res_for_G.shape)
-                          generated_outputs = netG(initial_z.to(device1), avg_ctxt_for_G.to(device1), high_res_for_G.to(device1))
-                          #save a batch of generated outputs
-                          logging.info("saving {}th realization for one z".format(str(i)))
-                          torch.save(generated_outputs, self.dir_to_save_z_realizations + 'exp_' + str(exp_id) + '/gen/' + str(i) + '_generated_month.pt')
-
-                     return
-
                 #GAN training
 
                 N_real = N_fake = 32.0 #assume batch size is 32
                 
                 #1. Train Discriminator on real+fake: maximize log(D(x)) + log(1-D(G(z))
                 #update D every second and every third time
-                if n_updates % 2 == 0:
-                #if n_updates % 2 == 0 or n_updates % 3 == 0:
+                #if n_updates % 2 == 0:
+         
+                #if acc on real is less than 50 -> train F for 20 iterations
+                train_D = 5 #hardcoded!
+                train_only_D = 0
+                count_train_only_D = 0
+
+                if train_only_D or n_updates % 2 == 0:
+                    if train_only_D:
+                        count_train_only_D += 1
+                        if count_train_only_D == train_D:
+                            count_train_only_D = 0
+                            train_only_D = 0 #reset counter
+
                     #save gradients for D
                     d_grad = ut.save_grads(netD, "Discriminator")
                     self._run.log_scalar('D_grads', d_grad)
                     logging.info("D gradients: {} ".format(d_grad))  
 
                     netD.zero_grad()
-                    #concatenate context with the input to feed D
-                    if self.add_noise: # WARNING: may need to be applied to each month in current_months
-                        self.noise = GaussianNoise(device)
-                        current_month = self.noise(current_month)
-                    
-                    correct_real, correct_fake = 0, 0
+
                     for worker in range(self.num_workers):
                         #ship to GPU
                         current_months[worker] = current_months[worker].to(device0)
@@ -240,10 +243,14 @@ class TrainerAdversar:
                         high_res_contexts[worker] = high_res_contexts[worker].to(device0)
                         real_labelss[worker] = real_labelss[worker].to(device0)
                         fake_labelss[worker] = fake_labelss[worker].to(device0)
-	
+                        
+                        if self.add_noise:
+                            current_months[worker] = self.noise(current_months[worker], device0)	
+
+
                         #feed real and real			
-                        if self.train_with_context:
-                            input = ds.build_input_for_D(current_months[worker], current_months[worker], avg_contexts[worker], high_res_contexts[worker])
+                        if self.train_D_with_lowres_context or self.train_D_with_highres_context:
+                            input = ds.build_input_for_D(current_months[worker], current_months[worker], avg_contexts[worker], high_res_contexts[worker], self.train_D_with_lowres_context, self.train_D_with_highres_context)
                         else:
                             input = current_months[worker]
 
@@ -251,14 +258,17 @@ class TrainerAdversar:
                         #1A. Train D on real
                         outputs = netD(input).squeeze()
                         d_real_loss = loss_func(outputs, real_labelss[worker])
+
                         #report d_real_loss
                         self._run.log_scalar('d_real_loss', d_real_loss.item(), n_updates) 
                         
-                        #calculate TP
-                        correct_real += torch.sum((outputs >= 0.5).float() == real_labelss[worker])
+                        #calculate for confusion matrix       
+                        TP, FN = get_confusion_matrix(outputs, real_labelss[worker], self.actual_batch_size, "real")
+                        total_TP += TP
+                        total_FN += FN
 
                         #1B. Train D on fake
-                        if self.train_with_context:
+                        if self.train_G_with_context:
                             high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
                             fake_inputs = netG(z[worker].to(device1), avg_ctxt_for_G.to(device1), high_res_for_G.to(device1))
                         else:
@@ -266,11 +276,11 @@ class TrainerAdversar:
 		
 	
                         if self.add_noise:
-                            fake_inputs = self.noise(fake_inputs)
+                            fake_inputs = self.noise(fake_inputs, device1)
        
                         #feed fake and real
-                        if self.train_with_context:
-                            fake_input_with_ctxt = ds.build_input_for_D(fake_inputs.to(device0), current_months[worker], avg_contexts[worker].to(device0), high_res_contexts[worker].to(device0))
+                        if self.train_D_with_lowres_context or self.train_D_with_highres_context:
+                            fake_input_with_ctxt = ds.build_input_for_D(fake_inputs.to(device0), current_months[worker], avg_contexts[worker].to(device0), high_res_contexts[worker].to(device0), self.train_D_with_lowres_context, self.train_D_with_highres_context)
                             D_input = fake_input_with_ctxt
                         else:
                             D_input = fake_inputs.to(device0)
@@ -294,10 +304,15 @@ class TrainerAdversar:
                         d_fake_loss = loss_func(outputs, fake_labelss[worker])
                         self._run.log_scalar('d_fake_loss', d_fake_loss.item(), n_updates)
                         
-                        #calculate FP
-                        correct_fake += torch.sum((outputs < 0.5).float() == fake_labelss[worker])
+                        TN, FP = get_confusion_matrix(outputs, fake_labelss[worker], self.actual_batch_size, "fake")
+                        total_TN += TN
+                        total_FP += FP
+
+
                         #Add the gradients from the all-real and all-fake batches    
                         d_loss = d_real_loss + d_fake_loss
+                        if self.add_mean_loss:
+       	       	       	    d_loss += 0.9 * mean_loss(outputs, current_months[worker])
 
                         D_epoch_loss += d_loss.item()
                         
@@ -333,15 +348,13 @@ class TrainerAdversar:
                                 self.replay_buffer = torch.cat((self.replay_buffer, samples_to_buffer),dim=0) 
                 
                     logging.info("epoch {}, rank {}, update {}, d loss = {:0.30f}, d real = {:0.30f}, d fake = {:0.30f}".format(current_epoch, rank, n_updates, d_loss.item(), d_real_loss.item(), d_fake_loss.item()))
-                    d_acc_real = (int(correct_real.item()) / 32.0) * 100
-                    d_acc_fake = (int(correct_fake.item()) / 32.0) * 100
+                    d_acc_real = (total_TP / 32.0) * 100
+                    d_acc_fake = (total_TN / 32.0) * 100 
+                    
+                    logging.info("TP = {}, FN = {}, FP = {}, TN = {}".format(total_TP, total_FN, total_FP, total_TN))
                     logging.info("D_acc_real = {:0.3f}, D_acc_fake = {:0.3f}".format(d_acc_real, d_acc_fake))
                 else:
                 
-                    #don't train G for first N iterations
-                    #if n_updates < 50:
-                    #    n_updates += 1
-                    #    continue
 
                     #2. Train Generator on D's response: maximize log(D(G(z))
                     #report grads
@@ -349,7 +362,9 @@ class TrainerAdversar:
                     self._run.log_scalar('G_grads', g_grad)
                     logging.info("G gradients: {}".format(g_grad))
                     netG.zero_grad()
-                    
+                    netD.zero_grad()                    
+
+
                     d_acc_real = 0
                     for worker in range(self.num_workers):
                         avg_contexts[worker] = avg_contexts[worker].to(device1)
@@ -357,8 +372,9 @@ class TrainerAdversar:
                         real_labelss[worker] = real_labelss[worker].to(device0)
                         z[worker] = z[worker].to(device1)
                         current_months[worker] = current_months[worker].to(device0)
+                        fake_labelss[worker] = fake_labelss[worker].to(device0)
 
-                        if self.train_with_context:
+                        if self.train_G_with_context:
                             high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
                         else:
                             high_res_for_G, avg_ctxt_for_G = None, None                        
@@ -371,21 +387,25 @@ class TrainerAdversar:
                         high_res_contexts[worker] = high_res_contexts[worker].to(device0)
            
                         #feed fake and real
-                        if self.train_with_context:
-                            d_input = ds.build_input_for_D(g_outputs_fake, current_months[worker], avg_contexts[worker], high_res_contexts[worker])
+                        if self.train_D_with_lowres_context or self.train_D_with_highres_context:
+                            d_input = ds.build_input_for_D(g_outputs_fake, current_months[worker], avg_contexts[worker], high_res_contexts[worker], self.train_D_with_lowres_context, self.train_D_with_highres_context)
                         else:
                             d_input = g_outputs_fake
                         
                         outputs = netD(d_input).squeeze()
                         g_loss = loss_func(outputs, real_labelss[worker])#compute loss for G
+                        if self.add_mean_loss:
+                            g_loss += 0.9 * mean_loss(outputs, current_months[worker])
+
 		
                         #compute additional loss for precipitation for G
                         #g_loss_additional = ut.generators_additional_term(g_outputs_fake, current_months[worker], self.alpha, self.beta, self.lambdas)
                         #g_loss  = g_loss + g_loss_additional
                         
-                        #compute accuracy for D:
-                        d_acc_real += torch.sum((outputs >= 0.5).float() == real_labelss[worker])                     
-                 
+                        TN, FP = get_confusion_matrix(outputs, fake_labelss[worker], self.actual_batch_size, "fake")                 
+                        total_TN_for_G_update += TN
+                        total_FP_for_G_update += FP
+
                         #update G
                         g_loss.backward()
 
@@ -398,7 +418,7 @@ class TrainerAdversar:
                             if n_gen_saved == n_data_to_save_on_process:
                                 save_data(gen_data_saved, self.gen_data_dir, 0, exp_id, dates_mapping) # WARNING: hardcoded rank to 0
                                 #free buffer
-                                save_model(netG, self.save_model)
+                                save_model(netG,netD, self.save_model)
                                 gen_data_saved = []
                       
                         #save real data
@@ -417,8 +437,8 @@ class TrainerAdversar:
                     G_epoch_loss += g_loss
                     logging.info("epoch {}, rank {}, update {}, g_loss = {:0.30f}\n".format(current_epoch, rank, n_updates, g_loss.item()))
                     self._run.log_scalar('g_loss', g_loss.item(), n_updates)
-                    d_acc_real = (int(d_acc_real.item()) / 32.0) * 100.0
-                    logging.info("D_acc_real = {:0.3f}".format(d_acc_real))
+                    d_acc_real = (total_TN_for_G_update / 32.0) * 100.0
+                    logging.info("D_acc_fake = {:0.3f}, TN = {}, FP = {}".format(d_acc_real, total_TN_for_G_update, total_FP_for_G_update))
 
                 n_updates += 1    
                 loss_n_updates += 1
@@ -441,10 +461,42 @@ def log_losses(run, losses, update):
     run.log_scalar('tas_loss', tas_loss.item(), update)
     run.log_scalar('total_loss', total_loss.item(), update)
 
+def get_confusion_matrix(data, labels, batch_size_for_one_worker, data_type):
+    """
+    data: outputs generated from real or fake data
+    size of the each tensor: (batch_size / num_workers) x Channels x H x W x T
+    data_type: real or fake
+
+    """
+    correct = 0
+    if data_type == "real":
+        correct = torch.sum((data >= 0.5).float() == labels)
+    else:
+        correct = torch.sum((data < 0.5).float() == labels)
+
+    correct = int(correct.item())
+    incorrect = batch_size_for_one_worker - correct
+    return correct, incorrect
+
+
+
+def mean_loss(generated, real):
+    """
+    generated: tensor B_SIZE x n_channels x H x W x T
+    real: tensor B_SIZE x n_channels x H x W x T
+
+    """
+    #compute mean map across the time:
+    gen_mean_map = generated.mean(-1)
+    real_mean_map = real.mean(-1)
+    return (generated.mean() - real.mean()) ** 2   
     
-def save_model(netG, dir):
-    logging.info("saving the model")
-    torch.save(netG.state_dict(), dir + 'model.pt')
+
+    
+def save_model(netG, netD, dir):
+    logging.info("saving the models")
+    torch.save(netG.state_dict(), dir + 'netG.pt')
+    torch.save(netD.state_dict(), dir + 'netD.pt')
     return
 
 
@@ -510,7 +562,13 @@ if __name__ == "__main__":
     parser.add_argument('--last_layer_size', type=int)
     parser.add_argument('--n_days',type=int)
     parser.add_argument('--label_smoothing', type=int)
-    parser.add_argument('--train_with_context', type=int)
+    parser.add_argument('--train_G_with_context', type=int)
+    parser.add_argument('--train_D_with_lowres_context',type=int)
+    parser.add_argument('--train_D_with_highres_context', type=int)  
+    parser.add_argument('--start_lr', type=float)
+    parser.add_argument('--end_lr', type=float) 
+    parser.add_argument('--add_mean_loss', type=int)
+    parser.add_argument('--partition_start',type=int)
 
     args = parser.parse_args()
 
@@ -532,7 +590,14 @@ if __name__ == "__main__":
     last_layer_size=args.last_layer_size
     n_days=args.n_days
     label_smoothing=args.label_smoothing
-    train_with_context = args.train_with_context
+    train_G_with_context = args.train_G_with_context
+    train_D_with_lowres_context = args.train_D_with_lowres_context
+    train_D_with_highres_context=args.train_D_with_highres_context
+    start_lr = args.start_lr 
+    end_lr = args.end_lr
+    add_mean_loss = args.add_mean_loss
+    partition_start = args.partition_start
+
 
     ex.add_config(
         num_epoch=num_epoch,
@@ -553,6 +618,12 @@ if __name__ == "__main__":
         last_layer_size=last_layer_size, 
         n_days=n_days,
         label_smoothing=label_smoothing,
-        train_with_context=train_with_context)
+        train_G_with_context=train_G_with_context,
+        train_D_with_lowres_context=train_D_with_lowres_context,
+        train_D_with_highres_context=train_D_with_highres_context,
+        start_lr=start_lr,
+        end_lr=end_lr,
+        add_mean_loss=add_mean_loss,
+        partition_start=partition_start)
     
     ex.run()

@@ -426,14 +426,17 @@ def main():
 	real_tsrs = process_tensors(real_data_dir, exp_id,  nrm, cmp_z_realizations)
 	#pr_real, tas_real, tasmin_real, tasmax_real = merge_tensors(real_tsrs)
 	pr_real = merge_tensors(real_tsrs)
-		
+	#pr_months = np.asarray(pr_real[:,:, 0:32])
+	#pr_mean = np.mean(pr_months, axis=-1)
+	#for_panoply_dir = for_panoply_dir + "exp_" + str(exp_id) + "/gen/"
+	#np.save(for_panoply_dir + 'pr_mean', pr_mean)
+	#return
 
 	one_month = 32 #one month = 32 days
 	n_maps = one_month * n_to_save_for_panoply
 	print("n_maps num{}".format(n_maps))
 	panoply_dir = for_panoply_dir	
 
-	#print("pr real shape ".format(pr_real.shape))
 
 
 
@@ -444,16 +447,17 @@ def main():
 		else:
 			for_panoply_dir = panoply_dir + "exp_" + str(exp_id) + "/gen/"
 		pr_months = np.asarray(pr_gen[:,:, 0:n_maps])
-		tas_months = np.asarray(tas_gen[:,:,0:n_maps])
-		tasmin_months = np.asarray(tasmin_gen[:,:,0:n_maps])
-		tasmax_months = np.asarray(tasmax_gen[:,:,0:n_maps])
+	
+		#tas_months = np.asarray(tas_gen[:,:,0:n_maps])
+		#tasmin_months = np.asarray(tasmin_gen[:,:,0:n_maps])
+		#tasmax_months = np.asarray(tasmax_gen[:,:,0:n_maps])
 		#rhs_months = np.asarray(rhs_gen[:,:,0:n_maps])
 		#rhsmin_months = np.asarray(rhsmin_gen[:,:,0:n_maps])
 		#rhsmax_months = np.asarray(rhsmax_gen[:,:,0:n_maps])
 		np.save(for_panoply_dir + 'pr', pr_months)
-		np.save(for_panoply_dir + 'tas', tas_months)
-		np.save(for_panoply_dir + 'tasmin', tasmin_months)
-		np.save(for_panoply_dir + 'tasmax', tasmax_months)
+		#np.save(for_panoply_dir + 'tas', tas_months)
+		#np.save(for_panoply_dir + 'tasmin', tasmin_months)
+		#np.save(for_panoply_dir + 'tasmax', tasmax_months)
 		#np.save(for_panoply_dir + 'rhs', rhs_months)
 		#np.save(for_panoply_dir + 'rhsmin', rhsmin_months)
 		#np.save(for_panoply_dir + 'rhsmax', rhsmax_months)
@@ -466,16 +470,16 @@ def main():
 			for_panoply_dir = panoply_dir + "exp_" + str(exp_id) + "/real/"
 
 		pr_months = np.asarray(pr_real[:,:, 0:n_maps])
-		tas_months = np.asarray(tas_real[:,:,0:n_maps])
-		tasmin_months = np.asarray(tasmin_real[:,:,0:n_maps])
-		tasmax_months = np.asarray(tasmax_real[:,:,0:n_maps])
+		#tas_months = np.asarray(tas_real[:,:,0:n_maps])
+		#tasmin_months = np.asarray(tasmin_real[:,:,0:n_maps])
+		#tasmax_months = np.asarray(tasmax_real[:,:,0:n_maps])
 		#rhs_months = np.asarray(rhs_real[:,:,0:n_maps])
 		#rhsmin_months = np.asarray(rhsmin_real[:,:,0:n_maps])
 		#rhsmax_months = np.asarray(rhsmax_real[:,:,0:n_maps])
 		np.save(for_panoply_dir + 'pr_real', pr_months)
-		np.save(for_panoply_dir + 'tas_real', tas_months)
-		np.save(for_panoply_dir + 'tasmin_real', tasmin_months)
-		np.save(for_panoply_dir + 'tasmax_real', tasmax_months)
+		#np.save(for_panoply_dir + 'tas_real', tas_months)
+		#np.save(for_panoply_dir + 'tasmin_real', tasmin_months)
+		#np.save(for_panoply_dir + 'tasmax_real', tasmax_months)
 		#np.save(for_panoply_dir + 'rhs_real', rhs_months)
 		#np.save(for_panoply_dir + 'rhsmin_real', rhsmin_months)
 		#np.save(for_panoply_dir + 'rhsmax_real', rhsmax_months)	

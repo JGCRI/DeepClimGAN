@@ -2,12 +2,8 @@ import numpy as np
 import os
 import sys
 from DeepClimGAN_Alt.NETCDFDataPartition import NETCDFDataPartition
-#from DeepClimGAN_Alt.Generator_8days import Generator
-#from DeepClimGAN_Alt.Discriminator_8days import Discriminator
-from DeepClimGAN_Alt.Generator_uncond import Generator
+from DeepClimGAN_Alt.Generator_alt import Generator
 from DeepClimGAN_Alt.Discriminator_uncond import Discriminator
-
-#from Generator_alt import Generator
 from Normalizer import Normalizer
 import torch
 import torch.nn as nn
@@ -25,8 +21,8 @@ import argparse
 import logging
 import csv
 
-exp_id = 83
-ex = Experiment('Exp 83: Pre-train unconditional GAN')
+exp_id = 114
+ex = Experiment('Exp 114: Pre-train conditional G and half cond D, where G is based on upsample + conv')
 
 
 #MongoDB
@@ -54,7 +50,7 @@ class TrainerSequential:
     @ex.capture
     def __init__(self):
         self.lon, self.lat, self.context_length, self.channels,self.apply_norm, self.data_dir = self.set_parameters()
-        self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size, self.n_days, self.train_with_context  = self.set_hyperparameters()
+        self.label_smoothing, self.add_noise, self.experience_replay, self.batch_size, self.lr, self.l1_lambda, self.num_epoch, self.replay_buffer_size, self.report_avg_loss, self.gen_data_dir, self.real_data_dir, self.save_gen_data_update, self.n_data_to_save, self.norms_dir, self.pretrain, self.save_model_dir, self.is_autoencoder, self.z_shape, self.num_smoothing_conv_layers, self.last_layer_size, self.n_days, self.train_D_with_lowres_context, self.train_D_with_highres_context, self.train_G_with_context  = self.set_hyperparameters()
         self.exp_id, self.exp_name, self._run = self.get_exp_info()
         #buffer for expereince replay        
         self.replay_buffer = []
@@ -68,8 +64,8 @@ class TrainerSequential:
         return lon, lat, context_length, channels,apply_norm, data_dir
     
     @ex.capture
-    def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape, num_smoothing_conv_layers,last_layer_size, n_days, train_with_context):
-        return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape, num_smoothing_conv_layers, last_layer_size, n_days, train_with_context
+    def set_hyperparameters(self, label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape, num_smoothing_conv_layers,last_layer_size, n_days, train_D_with_lowres_context,train_D_with_highres_context,  train_G_with_context):
+        return label_smoothing, add_noise, experience_replay, batch_size, lr, l1_lambda, num_epoch, replay_buffer_size, report_avg_loss, gen_data_dir, real_data_dir, save_gen_data_update, n_data_to_save, norms_dir, pretrain, save_model_dir, is_autoencoder, z_shape, num_smoothing_conv_layers, last_layer_size, n_days, train_D_with_lowres_context,train_D_with_highres_context, train_G_with_context
     
     @ex.capture
     def get_exp_info(self, _run):
@@ -96,8 +92,8 @@ class TrainerSequential:
         if self.label_smoothing:
             loss_func = torch.nn.KLDivLoss()
         
-        d_optim = torch.optim.Adam(netD.parameters(), self.lr, [0.05, 0.0999])
-        g_optim = torch.optim.Adam(netG.parameters(), self.lr, [0.05, 0.0999])
+        d_optim = torch.optim.AdamW(netD.parameters(), self.lr, [0.05, 0.0999])
+        g_optim = torch.optim.AdamW(netG.parameters(), self.lr, [0.05, 0.0999])
         
         device = torch.cuda.current_device()
         cpu_dev = torch.device("cpu")
@@ -193,19 +189,22 @@ class TrainerSequential:
                     netD.zero_grad()
 
                     for worker in range(self.num_workers):
-                        if self.train_with_context:
-                            input = ds.build_input_for_D(current_months[worker], current_months[worker], avg_contexts[worker], high_res_contexts[worker])            
+                        if self.train_D_with_lowres_context or self.train_D_with_highres_context:
+                            input = ds.build_input_for_D(current_months[worker], current_months[worker], avg_contexts[worker], high_res_contexts[worker],self.train_D_with_lowres_context,self.train_D_with_highres_context)            
                         else:
                             input = current_months[worker]
+
+                        #logging.info("shape is : {}".format(input.shape))
+                        #input size if b_size * 1 * 128 * 256 * 8 
                         outputs = netD(input).squeeze()
                   
-                        if self.train_with_context:
+                        if self.train_G_with_context:
                             high_res_for_G, avg_ctxt_for_G = ds.reshape_context_for_G(avg_contexts[worker], high_res_contexts[worker])
                             generated_month = netG(outputs, avg_ctxt_for_G, high_res_for_G)
                         else:
                             generated_month = netG(outputs, None, None)
-                        reconstruction_loss = mse_loss_func(current_months[worker], generated_month)
                         
+                        reconstruction_loss = mse_loss_func(current_months[worker], generated_month)
                         logging.info("reconstruction_loss {} \n".format(reconstruction_loss))
                         logging.info("n_updates {} \n".format(n_updates))
                         
@@ -500,7 +499,9 @@ if __name__ == "__main__":
     parser.add_argument('--num_smoothing_conv_layers', type=int)
     parser.add_argument('--last_layer_size',type=int)  
     parser.add_argument('--n_days', type=int)
-    parser.add_argument('--train_with_context', type=int)
+    parser.add_argument('--train_G_with_context', type=int)
+    parser.add_argument('--train_D_with_highres_context', type=int)
+    parser.add_argument('--train_D_with_lowres_context', type=int)
 
     args = parser.parse_args()
 
@@ -520,8 +521,11 @@ if __name__ == "__main__":
     num_smoothing_conv_layers=args.num_smoothing_conv_layers
     last_layer_size=args.last_layer_size
     n_days = args.n_days
-    train_with_context=args.train_with_context
-    
+    train_D_with_lowres_context=args.train_D_with_lowres_context
+    train_D_with_highres_context=args.train_D_with_highres_context
+    train_G_with_context=args.train_G_with_context
+
+
     ex.add_config(
         num_epoch=num_epoch,
         batch_size=batch_size,
@@ -539,6 +543,8 @@ if __name__ == "__main__":
         num_smoothing_conv_layers=num_smoothing_conv_layers,
         last_layer_size=last_layer_size,
         n_days=n_days,
-        train_with_context=train_with_context)
+        train_D_with_lowres_context=train_D_with_lowres_context,
+        train_D_with_highres_context=train_D_with_highres_context,
+        train_G_with_context=train_G_with_context)
     
     ex.run()
