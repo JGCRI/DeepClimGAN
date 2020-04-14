@@ -1,3 +1,11 @@
+"""
+Normalizes/ standartizes  all climate variables.
+Check the NeurIPS poster paper to see 
+what type of normalization/standartization is applied to
+a particular variable.
+
+"""
+
 import numpy as np
 import torch
 from Constants import clmt_vars

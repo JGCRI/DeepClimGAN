@@ -1,3 +1,8 @@
+"""
+Contains different utilities methods
+
+"""
+
 import sys
 from torch.autograd import Variable
 import csv

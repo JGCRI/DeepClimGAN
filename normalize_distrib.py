@@ -1,3 +1,8 @@
+"""
+Distributed normalization of the data.
+"""
+
+
 import sys
 from Utils import sort_files_by_size
 import argparse

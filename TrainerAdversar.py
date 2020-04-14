@@ -1,3 +1,9 @@
+"""
+
+Adversarial training of a GAN.
+Each batch is processed sequentially.
+"""
+
 import numpy as np
 import gc
 import os

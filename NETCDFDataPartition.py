@@ -1,3 +1,12 @@
+"""
+NETCDFDataPartition.py contains methods to work with 
+datapoints, such as:
+	-build inputs for D, G
+	-reshaping context
+etc.
+"""
+
+
 import numpy as np
 import torch
 import os

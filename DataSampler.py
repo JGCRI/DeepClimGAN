@@ -1,3 +1,11 @@
+"""
+DataSampler.py is responsible for :
+	-sampling
+	-iterating
+	-permuting
+the indices in the files, to build a batch
+"""
+
 from torch.utils.data.sampler import Sampler
 import torch
 import numpy as np

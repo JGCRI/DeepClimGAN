@@ -1,3 +1,9 @@
+"""
+get_statistics.py is used to get different kinds of statistics
+for the generated and ground truth data.
+
+"""
+
 
 from Constants import clmt_vars, grid_cells_for_stat
 from scipy import stats
@@ -277,29 +283,8 @@ def write_stats_to_csv(stats, fname, exp_id, type):
 	with open(fname, mode='w+', newline='') as of:
 		c_writer = csv.writer(of, delimiter=',')
 		for i in range(len(stats)):
-			#header = get_header(i)
-			#c_writer.writerow(header)
 			c_writer.writerow(stats[i])
 			c_writer.writerow('\n')
-
-def get_header(idx):
-	header = ""
-	if idx == 0:
-		header = "1. Precip: min, frac equal to 0, mean of vals != 0, sd of values == 0"
-	elif idx == 1:
-		header = "2. Temp: mean, sd/var, p-value"
-	elif idx == 2:
-		header = "3. Daily temp min/max: mean, sd, frac of time daily temp is between min and max"
-	elif idx == 3:
-		header = "4. Relative humidity: min, max, mean, sd"
-	elif idx == 4:
-		header = "5. RH: min_mean, max_mean, min_std, max_std, frac of time avg RH is between daily min and max"
-	elif idx == 5:
-		header = "6. Approx dew point"
-	
-	return header		
-
-
 
 
 def write_to_csv_for_time_series(tsrs, path, prefix):

@@ -9,6 +9,9 @@ import logging
 
 """
 reference: https://github.com/batsa003/videogan/blob/master/model.py
+Alterantive Generator, which means instead of doing transposed convolutions, 
+we are implementing upsample + same convolutional operation,
+that helps to smooth out the grid on the map.
 """
 n_channels = len(clmt_vars.items())
 
@@ -31,35 +34,29 @@ class Generator(nn.Module):
 		self.conv1 = conv3d_same(128, 512)
 		n_features = 512 + 64 + 32
 		self.batchNorm5d_1 = batchNorm5d(n_features)
-		#self.layerNorm_1 = layerNorm(n_features)
 		
 		#block 2
 		self.conv2 = conv3d_same(512+64+32, 256)
 		n_features = 256 + 32 + 16
 		self.batchNorm5d_2 = batchNorm5d(n_features)
-		#self.layerNorm_2 = layerNorm(n_features)
 		
 		#block 3
 		self.conv3 = conv3d_same(256+16+32, 128)
 		n_features = 128 + 16 + 8
 		self.batchNorm5d_3 = batchNorm5d(n_features)
-		#self.layerNorm_3 = layerNorm(n_features)
 
 		#block 4
 		self.conv4 = conv3d_same(128+16+8, 64)
 		n_features = 64 + 8 + 4
 		self.batchNorm5d_4 = batchNorm5d(n_features)
-		#self.layerNorm_4 = layerNorm(n_features)
 		
 		#block 5
 		self.conv5 = conv3d_same(64+8+4, 32)
 		n_features = 32 + 2 + init_ctxt_channel_size
 		self.batchNorm5d_5 = batchNorm5d(32+2+init_ctxt_channel_size)
-		#self.layerNorm_5 = layerNorm(n_features)
 		
 		#block 6
 		self.batchNorm5d_6 = batchNorm5d(last_layer_size)
-		#init_ctxt_channel_size + 32 + 2 = 69
 		self.upconv6 = conv3d_same(init_ctxt_channel_size+2+32, last_layer_size)
 		self.upconv6_for_smoothing = conv3d_same(last_layer_size, last_layer_size)
 		self.upconv6_final = conv3d_same(last_layer_size, n_channels)
@@ -101,7 +98,6 @@ class Generator(nn.Module):
 		avg1 = avg1.unsqueeze(-1).repeat(1, 1, 1, 1, rep_factor)		
 		x = torch.cat([x, avg1, init1], dim=1)#concat across feature channels
 		x = self.relu(self.batchNorm5d_1(x))
-		#x = self.relu(self.layerNorm_1(x))
 		
 		
 		#block 2
@@ -113,7 +109,6 @@ class Generator(nn.Module):
 		avg2 = avg2.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, avg2, init2],dim=1)
 		x = self.relu(self.batchNorm5d_2(x))
-		#x = self.relu(self.layerNorm_2(x))
 		
 		#block3
 		x = self.conv3(self.upsample(x))
@@ -124,7 +119,6 @@ class Generator(nn.Module):
 		avg3 = avg3.unsqueeze(-1).repeat(1,1,1,1,rep_factor)		
 		x = torch.cat([x, avg3, init3],dim=1)
 		x = self.relu(self.batchNorm5d_3(x))
-		#x = self.relu(self.layerNorm_3(x))
 
 
 		#block4
@@ -145,7 +139,6 @@ class Generator(nn.Module):
 		avg5 = avg_context.unsqueeze(-1).repeat(1,1,1,1,rep_factor)
 		x = torch.cat([x, init5, avg5],dim=1)
 		x = self.relu(self.batchNorm5d_5(x))
-		#x = self.relu(self.layerNorm_5(x))
 		
 		#block 6
 		x = self.upconv6(x)

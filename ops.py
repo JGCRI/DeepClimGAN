@@ -1,3 +1,9 @@
+"""
+Short notation of PyTorch operations.
+"""
+
+
+
 import torch.nn as nn
 from  torch.nn.modules.upsampling import Upsample
 
